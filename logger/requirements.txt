@@ -1,0 +1,8 @@
+opencv-python==4.9.0.80
+numpy==1.26.4
+Pillow==10.2.0
+pytesseract==0.3.10
+scikit-image==0.22.0
+pynput>=1.7
+pystray>=0.19.4
+pyinstaller>=6.0
