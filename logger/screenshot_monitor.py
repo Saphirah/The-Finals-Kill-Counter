@@ -1,7 +1,8 @@
 """
 Screenshot Monitor with OCR Detection
-Takes screenshots every second, compares with a reference image,
-and performs OCR text detection when similarity threshold is met.
+Watches the in-game countdown timer every second, then scans for the
+end-screen headline (WINNERS / ELIMINATED) and performs OCR to extract
+post-match stats when it is detected.
 """
 
 import time
@@ -183,19 +184,19 @@ class OverlayWindow:
         self.lbl_sleep = lbl('',                    '#ef9a9a')
 
         # Timer region preview
-        # lbl('Timer region:', '#555555')
+        lbl('Timer region:', '#555555')
         self.lbl_img_timer = tk.Label(self.root, bg=self._BG, bd=0)
-        # self.lbl_img_timer.pack(fill='x', padx=7, pady=1)
+        self.lbl_img_timer.pack(fill='x', padx=7, pady=1)
 
         # Map region preview
-        # lbl('Map region:', '#555555')
+        lbl('Map region:', '#555555')
         self.lbl_img_map = tk.Label(self.root, bg=self._BG, bd=0)
-        # self.lbl_img_map.pack(fill='x', padx=7, pady=1)
+        self.lbl_img_map.pack(fill='x', padx=7, pady=1)
 
         # Players region preview
-        # lbl('Players region:', '#555555')
+        lbl('Players region:', '#555555')
         self.lbl_img_players = tk.Label(self.root, bg=self._BG, bd=0)
-        # self.lbl_img_players.pack(fill='x', padx=7, pady=1)
+        self.lbl_img_players.pack(fill='x', padx=7, pady=1)
 
         # Players list (most likely per-slot)
         self.lbl_players_list = tk.Label(self.root, text='', fg='#eeeeee', bg=self._BG,
@@ -311,10 +312,10 @@ class OverlayWindow:
             preview = preview[:49] + '\u2026'
         self.lbl_last.config(text=f'Last: {preview}')
 
-        # Show processed (black & white) previews only
-        # self._update_photo(self.lbl_img_timer, s.get('timer_image_bgr_processed'), '_photo_timer', max_w=180)
-        # self._update_photo(self.lbl_img_map,   s.get('map_image_bgr_processed'),   '_photo_map',   max_w=180)
-        # self._update_photo(self.lbl_img_players, s.get('players_image_bgr_processed'), '_photo_players', max_w=180)
+        # Show processed (black & white) previews
+        self._update_photo(self.lbl_img_timer, s.get('timer_image_bgr_processed'), '_photo_timer', max_w=180)
+        self._update_photo(self.lbl_img_map,   s.get('map_image_bgr_processed'),   '_photo_map',   max_w=180)
+        self._update_photo(self.lbl_img_players, s.get('players_image_bgr_processed'), '_photo_players', max_w=180)
         
         # Players most-likely display
         players_most = s.get('players_most_likely')
@@ -508,10 +509,9 @@ class ScreenshotMonitor:
             while self._tab_pressed:
                 try:
                     player_img = self.capture_region(PLAYERS_TAB_REGION_REL)
-                    processed_players = apply_color_mask(player_img, COLOR_RANGES_COUNTDOWN, invert=True)
                     if self.overlay_state is not None:
                         self.overlay_state['players_image_bgr'] = player_img
-                        self.overlay_state['players_image_bgr_processed'] = processed_players
+                        self.overlay_state['players_image_bgr_processed'] = player_img
                     detected_names = self.detect_players(player_img)
                     for i, name in enumerate(detected_names):
                         if i < 10 and name:
@@ -541,51 +541,21 @@ class ScreenshotMonitor:
         listener.start()
         print("✓ Tab held listener active (hold Tab in-game to scan players)")
 
-    def _on_tab_pressed(self):
-        """Capture the map region and update self.current_map.
-
-        Waits 0.1 s after the key press so the scoreboard is fully rendered
-        before the screenshot is taken.
-        """
-        time.sleep(0.1)
-        try:
-            img = self.capture_region(MAP_REGION_REL)
-            # store raw and processed map previews for the overlay
-            processed_map = apply_color_mask(img, COLOR_RANGES_MAP, invert=True)
-            if self.overlay_state is not None:
-                self.overlay_state['map_image_bgr'] = img
-                self.overlay_state['map_image_bgr_processed'] = processed_map
-            detected = self.detect_map(img)
-            if detected:
-                self.current_map = detected
-                print(f"\n[TAB] Map set to: {self.current_map}")
-                if self.overlay_state is not None:
-                    self.overlay_state['map'] = self.current_map
-            else:
-                print(f"\n[TAB] Map unchanged: {self.current_map}")
-        except Exception as e:
-            print(f"\n[TAB] Map detection error: {e}")
-
-        # Detect player names from the scoreboard region and accumulate samples.
-        try:
-            player_img = self.capture_region(PLAYERS_TAB_REGION_REL)
-            detected_names = self.detect_players(player_img)
-            for i, name in enumerate(detected_names):
-                if i < 10 and name:
-                    self._player_samples[i].append(name)
-            print(f"[TAB] Players ({len(detected_names)} names): {detected_names}")
-        except Exception as pe:
-            print(f"[TAB] Player detection error: {pe}")
-
     def detect_players(self, image):
         """OCR the players tab region and return detected names (one per line, up to 10).
 
-        Applies the color_ranges_countdown mask (inverted) — the same pipeline used
-        for the countdown timer — then runs Tesseract in block-of-text mode.
+        Applies the full preprocessing pipeline from region_tester:
+        1. Color mask with COLOR_RANGES_COUNTDOWN (inverted for white text)
+        2. Contrast adjustment around brightness pivot (default: contrast=1.0, pivot=128)
+        3. Invert output (for Tesseract preference)
+        4. Run OCR with PSM 3 (fully automatic, block of text)
+        5. Sanitize to extract player names
+        
         Players are listed top-to-bottom: slots 0-4 = friendly team, 5-9 = enemy.
         """
-        # Preprocess players region to improve OCR, then read block of text
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        proc = cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR)
+        rgb = cv2.cvtColor(proc, cv2.COLOR_BGR2RGB)
         text = pytesseract.image_to_string(rgb, config='--psm 3').strip()
         lines = sanitize_ocr_lines(text)
         return lines[:10]
@@ -722,7 +692,7 @@ class ScreenshotMonitor:
             "deaths": int_or_neg1(stats.get("deaths")),
             "revives": int_or_neg1(stats.get("revives")),
             "objectives": int_or_neg1(stats.get("objectives")),
-            "won": bool(won),
+            "win": bool(won),
             "friendlyPlayers": json.dumps(friendly_players or []),
             "enemyPlayers": json.dumps(enemy_players or []),
         }
@@ -756,7 +726,6 @@ class ScreenshotMonitor:
         """
         MISS_THRESHOLD  = 8    # Phase-1 misses before Phase 2
         PHASE2_TIMEOUT  = 120  # seconds before Phase 2 gives up
-        SLEEP_DURATION  = 0  # seconds to sleep after a detection
 
         print("\n" + "=" * 60)
         print("Screenshot Monitor Started")
@@ -817,7 +786,6 @@ class ScreenshotMonitor:
                 phase2_start  = time.time()
                 ov(phase=2, phase_label='Scanning', game_running=False, sleeping=False)
 
-                phase2_matched = False
                 while True:
                     elapsed = time.time() - phase2_start
                     if elapsed > PHASE2_TIMEOUT:

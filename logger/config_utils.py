@@ -47,7 +47,7 @@ def _get_tesseract_path() -> str:
     if getattr(sys, 'frozen', False):
         bundled = os.path.join(sys._MEIPASS, 'tesseract', 'tesseract.exe')
         if os.path.exists(bundled):
-            os.environ['TESSDATA_PREFIX'] = os.path.join(sys._MEIPASS, 'tesseract')
+            os.environ['TESSDATA_PREFIX'] = os.path.join(sys._MEIPASS, 'tesseract', 'tessdata')
             return bundled
     for candidate in (
         r'C:\Program Files\Tesseract-OCR\tesseract.exe',

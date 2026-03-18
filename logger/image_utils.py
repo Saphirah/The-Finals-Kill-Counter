@@ -14,7 +14,7 @@ def sanitize_ocr_lines(text: str) -> list[str]:
         line = re.sub(r'[^A-Za-z0-9\-\#\s]', ' ', raw_line).strip()
         if not line:
             continue
-        splits = list(filter(lambda x: len(x) >= 5, line.split()))
+        splits = list(filter(lambda x: len(x) >= 7, line.split()))
         token = splits[-1] if splits else ''
         if token:
             result.append(token)

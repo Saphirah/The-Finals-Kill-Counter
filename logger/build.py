@@ -11,6 +11,10 @@ Download the Windows installer from:
     https://github.com/UB-Mannheim/tesseract/wiki
     (recommended: tesseract-ocr-w64-setup-*.exe, install to default path)
 
+Runtime files copied automatically into dist/ after a successful build:
+    config.json   – region/color/crop configuration
+    profile.json  – player profile (copied only if it already exists)
+
 Usage:
     python build.py
 """
@@ -33,6 +37,25 @@ def find_tesseract():
             if os.path.isfile(exe):
                 return path
     return None
+
+
+def copy_runtime_files(dist_dir: str):
+    """Copy runtime data files next to the EXE in dist/."""
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    # Required: config.json
+    src = os.path.join(here, 'config.json')
+    if os.path.isfile(src):
+        shutil.copy2(src, dist_dir)
+        print(f'✓ Copied config.json → {dist_dir}')
+    else:
+        print('⚠ config.json not found – the EXE will use built-in defaults.')
+
+    # Optional: profile.json (only if already set up on the build machine)
+    src = os.path.join(here, 'profile.json')
+    if os.path.isfile(src):
+        shutil.copy2(src, dist_dir)
+        print(f'✓ Copied profile.json → {dist_dir}')
 
 
 def check_pyinstaller():
@@ -90,7 +113,13 @@ def main():
         sys.exit(1)
 
     exe_path = os.path.join('dist', 'FinalsKillCounter.exe')
+    dist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dist')
     size_mb = os.path.getsize(exe_path) / (1024 * 1024) if os.path.isfile(exe_path) else 0
+
+    # --- Copy runtime files into dist/ --------------------------------------
+    print()
+    print('Copying runtime files …')
+    copy_runtime_files(dist_dir)
 
     print()
     print('=' * 60)
@@ -98,9 +127,8 @@ def main():
     print(f'   Output : dist\\FinalsKillCounter.exe  ({size_mb:.1f} MB)')
     print()
     print('   To use the EXE:')
-    print('   1. Copy  dist\\FinalsKillCounter.exe  to any folder.')
-    print('   2. Place your  reference.png  in the same folder.')
-    print('   3. Double-click the EXE.  A tray icon will appear.')
+    print('   1. Copy the entire  dist\\  folder (EXE + config.json) anywhere.')
+    print('   2. Double-click FinalsKillCounter.exe.  A tray icon will appear.')
     print('      Right-click it for  "Toggle Overlay"  and  "Quit".')
     print('      Home key also toggles the overlay.')
     print('=' * 60)

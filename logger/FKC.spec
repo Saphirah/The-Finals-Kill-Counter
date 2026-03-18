@@ -11,7 +11,7 @@
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
@@ -36,9 +36,6 @@ else:
 # ── Collect data files ───────────────────────────────────────────────────────
 datas = []
 
-# scikit-image compiled data (needed for ssim)
-datas += collect_data_files('skimage')
-
 # OpenCV data (haarcascades, etc.)
 datas += collect_data_files('cv2')
 
@@ -55,16 +52,12 @@ if _tess_dir:
             datas.append((os.path.join(_root, _f), _dest))
 
 # ── Hidden imports ────────────────────────────────────────────────────────────
-hiddenimports = (
-    collect_submodules('skimage')
-    + [
-        'pynput.keyboard._win32',
-        'pynput.mouse._win32',
-        'pystray._win32',
-        'PIL._tkinter_finder',
-        'skimage.metrics._structural_similarity',
-    ]
-)
+hiddenimports = [
+    'pynput.keyboard._win32',
+    'pynput.mouse._win32',
+    'pystray._win32',
+    'PIL._tkinter_finder',
+]
 
 # ── Analysis ─────────────────────────────────────────────────────────────────
 a = Analysis(
