@@ -1,190 +1,212 @@
-# Screenshot Monitor with OCR
+# Finals Kill Counter — Logger
 
-A Python program that continuously monitors your screen by comparing screenshots with a reference image. When a match is detected (similarity above threshold), it performs OCR text extraction and logs the results.
+The logger is the data-collection component of Finals Kill Counter. The primary script is `screenshot_monitor.py`. It runs in the background while you play The Finals, automatically detecting match end-screens, extracting your post-match stats via OCR, and uploading them to SpacetimeDB.
 
-## Features
+## How It Works
 
-- 📸 Takes screenshots every second
-- 🔍 Compares screenshots with a predefined reference image
-- 📊 Uses Structural Similarity Index (SSIM) for accurate comparison
-- 🔤 Performs OCR text detection using Tesseract when match is found
-- ⏸️ Automatic 5-minute timeout after detection
-- 📝 Saves detection logs with timestamps
+The monitor uses a two-phase detection loop:
+
+**Phase 1 — Game Detection**
+
+Every second, it reads a small countdown-timer region in the top-center of the screen using OCR. When a `MM:SS` timer is visible, it knows a match is in progress. After 8 consecutive misses (timer gone), it transitions to Phase 2.
+
+**Phase 2 — End-Screen Detection**
+
+The monitor watches a dedicated region for the `WINNERS` or `ELIMINATED` headline text. When detected, it takes a full screenshot, crops the stats panel, runs OCR to extract all numeric stats, and saves the result locally and uploads it to SpacetimeDB. After a successful capture, it waits for the next game. If no end-screen appears within 2 minutes, Phase 2 times out and the loop resets.
+
+**Tab Detection (in-game)**
+
+While Phase 1 is running, holding the `Tab` key triggers a parallel background thread that:
+
+- Reads the map name from the top-right corner (OCR + fuzzy match against known map names).
+- Continuously captures the scoreboard region every 0.5 seconds to read player names.
+- Accumulates name samples per slot (slots 0–4 = friendly team, 5–9 = enemy team) and picks the most-detected name per slot by majority vote.
+
+Player and map data detected during the match are attached to the final stats upload.
 
 ## Prerequisites
 
-### 1. Install Tesseract OCR
+### 1. Install Tesseract OCR (Windows)
 
-**Windows:**
+1. Download the installer from: https://github.com/UB-Mannheim/tesseract/wiki
+2. Run `tesseract-ocr-w64-setup-v5.x.x.exe` and install to the default path (`C:\Program Files\Tesseract-OCR`).
+3. The script auto-detects the default installation paths. If Tesseract is installed elsewhere, update `_get_tesseract_path()` in `config_utils.py`.
 
-1. Download from: https://github.com/UB-Mannheim/tesseract/wiki
-2. Run the installer (tesseract-ocr-w64-setup-v5.3.3.exe or later)
-3. During installation, note the installation path (default: `C:\Program Files\Tesseract-OCR`)
-4. Add Tesseract to your PATH, or update the path in the script:
-   ```python
-   pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-   ```
-
-**Linux:**
-
-```bash
-sudo apt-get install tesseract-ocr
-```
-
-**macOS:**
-
-```bash
-brew install tesseract
-```
-
-### 2. Python Dependencies
-
-Activate your virtual environment and install requirements:
+Verify the installation:
 
 ```powershell
+tesseract --version
+```
+
+### 2. Python Environment
+
+```powershell
+cd logger
+python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Usage
-
-### Step 1: Prepare Your Reference Image
-
-Take a screenshot of the screen state you want to detect and save it (e.g., `reference.png`).
-
-### Step 2: Run the Monitor
+## Running the Monitor
 
 ```powershell
-python screenshot_monitor.py <reference_image_path> [similarity_threshold]
+python screenshot_monitor.py
 ```
 
-**Arguments:**
+On the first run, a small setup dialog will appear asking for your player profile name. This name is attached to every uploaded match entry. It is saved in `profile.json` and reused on subsequent runs.
 
-- `reference_image_path`: Path to your reference screenshot (required)
-- `similarity_threshold`: Number between 0-1 (optional, default: 0.95)
-  - 1.0 = exact match only
-  - 0.95 = very similar (recommended)
-  - 0.8 = moderately similar
+The monitor starts an always-on-top HUD overlay in the top-left corner of your screen showing current state. Press the `Home` key to toggle overlay visibility. The overlay can be dragged by clicking and holding anywhere on it.
 
-**Examples:**
+Stop the monitor at any time with `Ctrl+C` or via the system tray icon.
 
-```powershell
-# Using default threshold (0.95)
-python screenshot_monitor.py reference.png
+## Overlay Information
 
-# Custom threshold
-python screenshot_monitor.py reference.png 0.9
+| Field                         | Description                                           |
+| ----------------------------- | ----------------------------------------------------- |
+| Player                        | Your profile name                                     |
+| Map                           | Last detected map name                                |
+| Phase                         | 1 = watching timer, 2 = scanning end-screen           |
+| Game                          | Whether the countdown timer is currently visible      |
+| Last                          | Preview of the most recently extracted stats          |
+| Timer / Map / Players regions | Live cropped previews of the OCR regions              |
+| Friendly / Enemy              | Most-likely player names detected from Tab scoreboard |
 
-# With full path
-python screenshot_monitor.py "C:\Images\target_screen.png" 0.95
-```
+## In-Game Workflow
 
-### Step 3: Monitor Output
-
-The program will display:
-
-- Current time and similarity score every second
-- "MATCH DETECTED!" when threshold is exceeded
-- Extracted text from the screen
-- Log file location
-
-### Step 4: Stop Monitoring
-
-Press `Ctrl+C` to stop the program.
+1. Launch the monitor before or after starting The Finals.
+2. When a match begins, Phase 1 detects the timer and starts tracking.
+3. During the match, hold `Tab` to open the in-game scoreboard. The monitor will read the map name and player names automatically.
+4. When the match ends:
+   - The `WINNERS` or `ELIMINATED` screen triggers stat extraction automatically.
+   - Stats are saved to `detection_logs/` as a JSON file.
+   - Stats are uploaded to SpacetimeDB.
+5. The monitor resets and waits for the next match.
 
 ## Output
 
-### Console Output
+### Local Detection Logs
 
-```
-[14:30:15] Similarity: 0.7234
-[14:30:16] Similarity: 0.8891
-[14:30:17] Similarity: 0.9521 ✓ MATCH DETECTED!
-Performing OCR text detection...
-
---- Extracted Text (245 characters) ---
-[Detected text appears here]
-```
-
-### Log Files
-
-Detection logs are saved in the `detection_logs/` folder:
+Saved in `detection_logs/` as timestamped JSON files:
 
 ```
 detection_logs/
-├── detection_2026-03-11_14-30-17.txt
-├── detection_2026-03-11_15-45-23.txt
+├── detection_2026-03-18_21-00-00.json
+├── detection_2026-03-18_21-00-00_original.png
+├── detection_2026-03-18_21-00-00_processed.png
 └── ...
 ```
 
-Each log contains:
+Each JSON file contains:
 
-- Detection timestamp
-- Similarity score
-- Full extracted text
+```json
+{
+  "detection_time": "2026-03-18 21:00:00",
+  "profile": "YourName",
+  "similarity_score": 1.0,
+  "map": "Monaco",
+  "won": true,
+  "stats": {
+    "combat_score": 4200,
+    "objective_score": 1100,
+    "support_score": 800,
+    "eliminations": 7,
+    "assists": 3,
+    "deaths": 2,
+    "revives": 1,
+    "objectives": 4
+  },
+  "players": {
+    "friendly": [{"name": "Ally1"}, ...],
+    "enemy": [{"name": "Opponent1"}, ...]
+  }
+}
+```
+
+### SpacetimeDB Upload
+
+Every detection is also POSTed to the configured SpacetimeDB instance (`finalskillcounter` database on maincloud). The webserver reads from this database in real time.
 
 ## Configuration
 
-### Adjust Similarity Threshold
+All tunable values live in `config.json` next to the executable (or script).
 
-Lower threshold = more sensitive (may trigger false positives)
-Higher threshold = less sensitive (may miss variations)
+### Screen Regions
+
+Region bounds are stored as relative fractions of screen size (0.0–1.0), so they scale automatically to any resolution.
+
+| Key                     | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `countdown_region_rel`  | Where the in-game timer is read (Phase 1)      |
+| `map_region_rel`        | Where the map name is read when Tab is held    |
+| `players_tab_region`    | The scoreboard region scanned for player names |
+| `crop_bounds_rel`       | The stats panel cropped for final OCR          |
+| `eliminated_won_region` | Region checked for WINNERS/ELIMINATED text     |
+
+Use `region_tester.py` to visually verify and adjust region coordinates for your display.
+
+### Color Ranges
+
+HSV color masks are used to isolate text before OCR. Each range is a `[[H_lo, S_lo, V_lo], [H_hi, S_hi, V_hi]]` pair.
+
+| Key                        | Used for                                  |
+| -------------------------- | ----------------------------------------- |
+| `color_ranges_countdown`   | White countdown timer text                |
+| `color_ranges_map`         | White/near-white map name text            |
+| `color_ranges_endscreen`   | White and yellow stats text on end-screen |
+| `color_ranges_players_tab` | White player name text on scoreboard      |
+
+Use `color_range_tester.py` to interactively tune HSV mask parameters.
+
+## Building a Standalone Executable
+
+`build.py` automates a PyInstaller build that bundles Tesseract and all Python dependencies into a single `FKC.exe`:
 
 ```powershell
-# Very strict matching
-python screenshot_monitor.py reference.png 0.98
-
-# More lenient matching
-python screenshot_monitor.py reference.png 0.85
+pip install pyinstaller
+python build.py
 ```
 
-### Modify Tesseract Path
+The EXE is output to `dist/FKC/`. The build script also copies `config.json` (and `profile.json` if present) next to the EXE.
 
-If Tesseract is not in your PATH, edit `screenshot_monitor.py`:
+## Helper Scripts
 
-```python
-# Uncomment and update this line (around line 28)
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-```
-
-### Change Timeout Duration
-
-Edit line 119 in `screenshot_monitor.py`:
-
-```python
-time.sleep(300)  # Change 300 to desired seconds
-```
+| Script                  | Purpose                                             |
+| ----------------------- | --------------------------------------------------- |
+| `screenshot_monitor.py` | **Primary script** — run this to start logging      |
+| `config_utils.py`       | Shared path and config-loading utilities            |
+| `image_utils.py`        | Color masking and OCR line sanitization             |
+| `region_tester.py`      | Visual tool for adjusting screen-region coordinates |
+| `color_range_tester.py` | Interactive HSV color range tuner                   |
+| `build.py`              | PyInstaller build script for the standalone EXE     |
 
 ## Troubleshooting
 
-### "Tesseract not found"
+**Tesseract not found**
+Run `tesseract --version`. If it is not on PATH, install it to the default location or edit `_get_tesseract_path()` in `config_utils.py`.
 
-- Verify Tesseract is installed: Run `tesseract --version` in terminal
-- Add Tesseract to PATH or set path in script
+**Stats not detected / wrong numbers**
+The stats region or color ranges may need calibration for your display. Use `region_tester.py` to verify the crop bounds and `color_range_tester.py` to tune the HSV masks, then update `config.json`.
 
-### "Reference image not found"
+**Map always shows "Unknown"**
+Hold Tab in-game before the match ends so the monitor can read the map name. The map region must be visible and correctly configured in `config.json`.
 
-- Check file path is correct
-- Use absolute path or ensure file is in same directory
+**Player names missing or garbled**
+Hold Tab for at least one second. The monitor takes multiple samples and picks the most common result per slot, so a longer hold gives better accuracy. Adjust `players_tab_region` in `config.json` if the scoreboard is not inside the configured bounds.
 
-### OCR not detecting text
+**Upload fails**
+Check your internet connection. SpacetimeDB errors are printed to the console with the HTTP status code and response body. The local JSON log is always saved regardless of upload success.
 
-- Ensure text is clear and readable in screenshot
-- Try preprocessing images for better OCR results
-- Install additional Tesseract language packs if needed
+## Known Maps
 
-### High CPU usage
+The Finals maps recognized by the fuzzy OCR matcher:
 
-- Normal behavior due to continuous screenshot capture
-- Increase sleep interval if needed (edit line 155)
-
-## Technical Details
-
-- **Image Comparison**: Uses Structural Similarity Index (SSIM)
-- **OCR Engine**: Tesseract OCR 5.x
-- **Screenshot**: PIL ImageGrab (cross-platform)
-- **Image Processing**: OpenCV and scikit-image
-
-## License
-
-Free to use and modify for your projects.
+- Kyoto
+- Bernal
+- Las Vegas Stadium
+- Monaco
+- Nozomi
+- Citadel
+- Seoul
+- Skyway Stadium
+- Sys$Horizon
+- Practice Range
