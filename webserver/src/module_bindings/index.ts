@@ -34,13 +34,16 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import ClearLiveStateReducer from "./clear_live_state_reducer";
 import DeleteMatchReducer from "./delete_match_reducer";
 import SubmitMatchReducer from "./submit_match_reducer";
+import UpdateLiveStateReducer from "./update_live_state_reducer";
 import UpdateMatchReducer from "./update_match_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import LiveStateRow from "./live_state_table";
 import MatchEntryRow from "./match_entry_table";
 import MatchPlayerRow from "./match_player_table";
 import PlayerRow from "./player_table";
@@ -49,6 +52,17 @@ import PlayerRow from "./player_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  liveState: __table({
+    name: 'live_state',
+    indexes: [
+      { accessor: 'id', name: 'live_state_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'live_state_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, LiveStateRow),
   matchEntry: __table({
     name: 'match_entry',
     indexes: [
@@ -92,8 +106,10 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("clear_live_state", ClearLiveStateReducer),
   __reducerSchema("delete_match", DeleteMatchReducer),
   __reducerSchema("submit_match", SubmitMatchReducer),
+  __reducerSchema("update_live_state", UpdateLiveStateReducer),
   __reducerSchema("update_match", UpdateMatchReducer),
 );
 

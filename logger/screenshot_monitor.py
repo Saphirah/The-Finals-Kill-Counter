@@ -361,6 +361,9 @@ class ScreenshotMonitor:
         # Per-match player name samples: 10 slots (0-4 friendly, 5-9 enemy).
         # Accumulated across all tab presses during a match; reset on new game.
         self._player_samples: list[list[str]] = [[] for _ in range(10)]
+        # Tracking fields to avoid redundant live-state uploads.
+        self._last_live_players: list[str] = [""] * 10
+        self._last_live_map: str | None = None
         self.load_mask()
         self.start_tab_listener()
 
@@ -502,6 +505,8 @@ class ScreenshotMonitor:
                     print(f"\n[TAB] Map set to: {self.current_map}")
                     if self.overlay_state is not None:
                         self.overlay_state['map'] = self.current_map
+                    # Push updated map to live state (players may not be ready yet, that's fine)
+                    self.upload_live_state()
             except Exception as e:
                 print(f"\n[TAB] Map detection error: {e}")
 
@@ -521,6 +526,9 @@ class ScreenshotMonitor:
                         self.overlay_state['players_most_likely'] = most
                         self.overlay_state['players_last_raw'] = '\n'.join(detected_names)
                     print(f"[TAB] Players ({len(detected_names)} names): {detected_names}")
+                    # Upload live state if players or map changed since last upload.
+                    if most != self._last_live_players or self.current_map != self._last_live_map:
+                        self.upload_live_state()
                 except Exception as e:
                     print(f"[TAB] Player detection error: {e}")
                 time.sleep(0.5)
@@ -671,6 +679,8 @@ class ScreenshotMonitor:
                        won=won,
                        friendly_players=friendly_players,
                        enemy_players=enemy_players)
+        # Clear live state — match has been recorded in history.
+        self.clear_live_state_remote()
 
     def upload_to_spacetimedb(self, stats, detection_time, similarity_score, won=True, friendly_players=None, enemy_players=None):
         """Upload match stats to SpacetimeDB via HTTP API."""
@@ -708,7 +718,47 @@ class ScreenshotMonitor:
             print(f"✗ SpacetimeDB upload error {e.code}: {body}")
         except Exception as e:
             print(f"✗ SpacetimeDB upload failed: {e}")
-    
+
+    def _post_to_spacetimedb(self, reducer: str, payload: dict, label: str):
+        """Fire-and-forget POST to a SpacetimeDB reducer in a daemon thread."""
+        import threading
+        def _send():
+            url = f"{SPACETIMEDB_HOST}/v1/database/{SPACETIMEDB_DB}/call/{reducer}"
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Accept", "application/json")
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    print(f"✓ {label} (HTTP {resp.status})")
+            except urllib.error.HTTPError as e:
+                body = e.read().decode(errors="replace")
+                print(f"✗ {label} error {e.code}: {body}")
+            except Exception as e:
+                print(f"✗ {label} failed: {e}")
+        threading.Thread(target=_send, daemon=True).start()
+
+    def upload_live_state(self):
+        """Send current map + most-likely players to SpacetimeDB live_state table."""
+        player_names = self.get_most_detected_players()
+        friendly = [{"name": player_names[i]} for i in range(5)]
+        enemy    = [{"name": player_names[i + 5]} for i in range(5)]
+        payload = {
+            "playerName": self.profile_name or "Unknown",
+            "map": self.current_map or "",
+            "friendlyPlayers": json.dumps(friendly),
+            "enemyPlayers": json.dumps(enemy),
+        }
+        self._last_live_players = list(player_names)
+        self._last_live_map = self.current_map
+        self._post_to_spacetimedb("update_live_state", payload, "Live state updated")
+
+    def clear_live_state_remote(self):
+        """Remove live_state row from SpacetimeDB (called when match ends)."""
+        self._last_live_players = [""] * 10
+        self._last_live_map = None
+        self._post_to_spacetimedb("clear_live_state", {}, "Live state cleared")
+
     def run(self):
         """Main monitoring loop.
 
@@ -751,6 +801,8 @@ class ScreenshotMonitor:
                         waiting_for_game = False
                         misses = 0
                         self._player_samples = [[] for _ in range(10)]  # Reset for new game
+                        self._last_live_players = [""] * 10
+                        self._last_live_map = None
                         print(f"[{ts}] ⏵ Countdown found – resuming Phase 1 monitoring")
                         ov(phase=1, phase_label='Watching', game_running=True,
                            timer=raw, sleeping=False)
@@ -793,6 +845,8 @@ class ScreenshotMonitor:
                               f"returning to Phase 1 (watching) and resetting per-match data")
                         # Reset per-match player samples (player left / match aborted)
                         self._player_samples = [[] for _ in range(10)]
+                        self._last_live_players = [""] * 10
+                        self._last_live_map = None
                         # Clear players preview in overlay
                         if self.overlay_state is not None:
                             self.overlay_state['players_most_likely'] = None

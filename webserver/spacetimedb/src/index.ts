@@ -65,10 +65,22 @@ const MatchPlayer = table(
   },
 );
 
+const LiveState = table(
+  { name: "live_state", public: true },
+  {
+    id: t.u64().primaryKey(),
+    playerName: t.string(),
+    map: t.string(),
+    friendlyPlayers: t.string(),
+    enemyPlayers: t.string(),
+  },
+);
+
 const spacetimedb = schema({
   player: Player,
   matchEntry: MatchEntry,
   matchPlayer: MatchPlayer,
+  liveState: LiveState,
 });
 export default spacetimedb;
 
@@ -94,7 +106,9 @@ export const submit_match = spacetimedb.reducer(
   },
   (ctx, args) => {
     // Reject duplicate: same player + detectionTime already in the table.
-    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(args.playerName)) {
+    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(
+      args.playerName,
+    )) {
       if (entry.detectionTime === args.detectionTime) {
         // Silently return — duplicate, no insert.
         return;
@@ -124,7 +138,9 @@ export const submit_match = spacetimedb.reducer(
 
     // Find the newly inserted match to get its auto-generated id.
     let matchId = 0n;
-    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(args.playerName)) {
+    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(
+      args.playerName,
+    )) {
       if (entry.detectionTime === args.detectionTime) {
         matchId = entry.id;
         break;
@@ -155,15 +171,18 @@ export const submit_match = spacetimedb.reducer(
   },
 );
 
-export const delete_match = spacetimedb.reducer({ id: t.u64() }, (ctx, { id }) => {
-  const existing = ctx.db.matchEntry.id.find(id);
-  if (!existing) return;
-  ctx.db.matchEntry.id.delete(id);
-  // Delete all associated MatchPlayer rows.
-  for (const mp of ctx.db.matchPlayer.match_player_match_id.filter(id)) {
-    ctx.db.matchPlayer.id.delete(mp.id);
-  }
-});
+export const delete_match = spacetimedb.reducer(
+  { id: t.u64() },
+  (ctx, { id }) => {
+    const existing = ctx.db.matchEntry.id.find(id);
+    if (!existing) return;
+    ctx.db.matchEntry.id.delete(id);
+    // Delete all associated MatchPlayer rows.
+    for (const mp of ctx.db.matchPlayer.match_player_match_id.filter(id)) {
+      ctx.db.matchPlayer.id.delete(mp.id);
+    }
+  },
+);
 
 export const update_match = spacetimedb.reducer(
   {
@@ -198,3 +217,33 @@ export const update_match = spacetimedb.reducer(
     });
   },
 );
+
+export const update_live_state = spacetimedb.reducer(
+  {
+    playerName: t.string(),
+    map: t.string(),
+    friendlyPlayers: t.string(),
+    enemyPlayers: t.string(),
+  },
+  (ctx, args) => {
+    // Single-row upsert: delete existing row (id=1) then re-insert.
+    const existing = ctx.db.liveState.id.find(1n);
+    if (existing) {
+      ctx.db.liveState.id.delete(1n);
+    }
+    ctx.db.liveState.insert({
+      id: 1n,
+      playerName: args.playerName,
+      map: args.map,
+      friendlyPlayers: args.friendlyPlayers,
+      enemyPlayers: args.enemyPlayers,
+    });
+  },
+);
+
+export const clear_live_state = spacetimedb.reducer({}, (ctx) => {
+  const existing = ctx.db.liveState.id.find(1n);
+  if (existing) {
+    ctx.db.liveState.id.delete(1n);
+  }
+});

@@ -11,7 +11,7 @@ def sanitize_ocr_lines(text: str) -> list[str]:
     """
     result = []
     for raw_line in text.splitlines():
-        line = re.sub(r'[^A-Za-z0-9\-\#\s]', ' ', raw_line).strip()
+        line = re.sub(r'[^A-Za-z0-9\-\#\_\s]', ' ', raw_line).strip()
         if not line:
             continue
         splits = list(filter(lambda x: len(x) >= 7, line.split()))

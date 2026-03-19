@@ -10,6 +10,15 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const LiveState = __t.object("LiveState", {
+  id: __t.u64(),
+  playerName: __t.string(),
+  map: __t.string(),
+  friendlyPlayers: __t.string(),
+  enemyPlayers: __t.string(),
+});
+export type LiveState = __Infer<typeof LiveState>;
+
 export const MatchEntry = __t.object("MatchEntry", {
   id: __t.u64(),
   playerName: __t.string(),

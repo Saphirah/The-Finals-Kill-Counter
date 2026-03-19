@@ -10,6 +10,7 @@ import { KDTrendChart } from "../components/profile/KDTrendChart";
 import { MapStatsTable } from "../components/profile/MapStatsTable";
 import { MatchHistoryTable } from "../components/profile/MatchHistoryTable";
 import { PlayerHeader } from "../components/profile/PlayerHeader";
+import { LivePreview } from "../components/profile/LivePreview";
 
 export default function PlayerProfile() {
   const { name } = useParams<{ name: string }>();
@@ -18,7 +19,7 @@ export default function PlayerProfile() {
 
   const [allMatches] = useTable(tables.matchEntry);
   const [allMatchPlayers] = useTable(tables.matchPlayer);
-  const [tab, setTab] = useState<"alltime" | "today">("alltime");
+  const [tab, setTab] = useState<"alltime" | "today" | "live">("alltime");
 
   const matches = useMemo(() => allMatches.filter((m) => m.playerName === playerName).sort((a, b) => b.detectionTime.localeCompare(a.detectionTime)), [allMatches, playerName]);
 
@@ -194,84 +195,96 @@ export default function PlayerProfile() {
             TODAY
             {tab === "today" && activeMatches.length === 0 ? "" : tab === "today" ? ` (${activeMatches.length})` : ""}
           </button>
+          <button style={tab === "live" ? liveActiveTab : liveInactiveTab} onClick={() => setTab("live")}>
+            <span style={liveDot} />
+            LIVE
+          </button>
         </div>
-        {/* overview averages */}
-        <section style={styles.section}>
-          <h3 style={styles.sectionTitle}>GLOBAL TOTALS</h3>
-          <div style={styles.cardGrid}>
-            <SummaryBadge label="Games Played" value={overview.games} color="var(--green)" />
-            <SummaryBadge label="Total Elims" value={overview.totalElims} color="var(--green)" />
-            <SummaryBadge label="Total Deaths" value={overview.totalDeaths} color="var(--red)" />
-            <SummaryBadge label="Total Assists" value={overview.totalAssists} color="var(--blue)" />
-            <SummaryBadge label="Total Revives" value={overview.totalRevives} color="var(--purple)" />
-            <SummaryBadge label="Total Objectives" value={overview.totalObjectives} color="var(--accent)" />
-          </div>
-        </section>
 
-        <section style={styles.section}>
-          <h3 style={styles.sectionTitle}>GLOBAL AVERAGES</h3>
-          <div style={styles.cardGrid}>
-            <OverviewCard label="OVERALL KD" value={fmt(overview.avgKD)} icon="⚔️" color={overview.avgKD >= 1 ? "var(--green)" : "var(--red)"} />
-            <OverviewCard label="AVG ELIMS" value={fmt(overview.avgElims, 1)} icon="💀" color="var(--green)" />
-            <OverviewCard label="AVG DEATHS" value={fmt(overview.avgDeaths, 1)} icon="☠️" color="var(--red)" />
-            <OverviewCard label="AVG ASSISTS" value={fmt(overview.avgAssists, 1)} icon="🤝" color="var(--blue)" />
-            <OverviewCard label="AVG SCORE" value={Math.round(overview.avgScore).toLocaleString()} icon="🏆" color="var(--accent)" />
-          </div>
-        </section>
+        {/* LIVE tab */}
+        {tab === "live" && <LivePreview playerName={playerName} allMatches={allMatches} allMatchPlayers={allMatchPlayers} />}
 
-        {/* career highs */}
-        <section style={styles.section}>
-          <h3 style={styles.sectionTitle}>
-            SINGLE GAME RECORDS <span style={styles.sectionHint}>(career highs)</span>
-          </h3>
-          <div style={styles.cardGrid}>
-            <OverviewCard label="MOST ELIMS" value={overview.bestGameElims} icon="🏆" color="var(--green)" />
-            <OverviewCard label="BEST KD" value={`${fmt(overview.bestGameKD)}`} icon="⚔️" color="var(--accent)" />
-            <OverviewCard label="MOST DEATHS" value={overview.bestGameDeaths} icon="☠️" color="var(--red)" />
-            <OverviewCard label="MOST ASSISTS" value={overview.bestGameAssists} icon="🤝" color="var(--blue)" />
-            <OverviewCard label="MOST REVIVES" value={overview.bestGameRevives} icon="💉" color="var(--purple)" />
-            <OverviewCard label="MOST OBJECTIVES" value={overview.bestGameObjectives} icon="🎯" color="var(--accent)" />
-            <OverviewCard label="BEST COMBAT" value={overview.bestGameCombat.toLocaleString()} icon="⚡" color="var(--green)" />
-            <OverviewCard label="BEST OBJ SCORE" value={overview.bestGameObjScore.toLocaleString()} icon="📦" color="var(--blue)" />
-            <OverviewCard label="BEST SUPPORT" value={overview.bestGameSupport.toLocaleString()} icon="🛡️" color="var(--purple)" />
-            <OverviewCard label="BEST TOTAL SCORE" value={overview.bestGameTotal.toLocaleString()} icon="🏅" color="var(--accent)" />
-          </div>
-        </section>
-
-        {/* charts */}
-        {kdTrend.length >= 2 && (
-          <section style={styles.section}>
-            <div style={styles.chartsRow}>
-              <KDTrendChart data={kdTrend} />
-              <div style={styles.chartCard}>
-                <h3 style={styles.sectionTitle}>
-                  SCORE BREAKDOWN <span style={styles.sectionHint}>(last {Math.min(kdTrend.length, 10)} games)</span>
-                </h3>
-                <ScoreBreakdownChart matches={[...matches].reverse().slice(-10)} />
+        {tab !== "live" && (
+          <>
+            {/* overview averages */}
+            <section style={styles.section}>
+              <h3 style={styles.sectionTitle}>GLOBAL TOTALS</h3>
+              <div style={styles.cardGrid}>
+                <SummaryBadge label="Games Played" value={overview.games} color="var(--green)" />
+                <SummaryBadge label="Total Elims" value={overview.totalElims} color="var(--green)" />
+                <SummaryBadge label="Total Deaths" value={overview.totalDeaths} color="var(--red)" />
+                <SummaryBadge label="Total Assists" value={overview.totalAssists} color="var(--blue)" />
+                <SummaryBadge label="Total Revives" value={overview.totalRevives} color="var(--purple)" />
+                <SummaryBadge label="Total Objectives" value={overview.totalObjectives} color="var(--accent)" />
               </div>
-            </div>
-          </section>
-        )}
+            </section>
 
-        {tab === "today" && activeMatches.length === 0 && (
-          <section style={styles.section}>
-            <p
-              style={{
-                color: "var(--text-sub)",
-                fontSize: 14,
-                textAlign: "center",
-                padding: "32px 0",
-              }}
-            >
-              No matches recorded today yet.
-            </p>
-          </section>
-        )}
-        <MapStatsTable matches={activeMatches} />
-        {(playedWith.length > 0 || playedAgainst.length > 0) && <PlayerEncountersTable playedWith={playedWith} playedAgainst={playedAgainst} />}
+            <section style={styles.section}>
+              <h3 style={styles.sectionTitle}>GLOBAL AVERAGES</h3>
+              <div style={styles.cardGrid}>
+                <OverviewCard label="OVERALL KD" value={fmt(overview.avgKD)} icon="⚔️" color={overview.avgKD >= 1 ? "var(--green)" : "var(--red)"} />
+                <OverviewCard label="AVG ELIMS" value={fmt(overview.avgElims, 1)} icon="💀" color="var(--green)" />
+                <OverviewCard label="AVG DEATHS" value={fmt(overview.avgDeaths, 1)} icon="☠️" color="var(--red)" />
+                <OverviewCard label="AVG ASSISTS" value={fmt(overview.avgAssists, 1)} icon="🤝" color="var(--blue)" />
+                <OverviewCard label="AVG SCORE" value={Math.round(overview.avgScore).toLocaleString()} icon="🏆" color="var(--accent)" />
+              </div>
+            </section>
 
-        <MatchHistoryTable matches={activeMatches} />
-        <MatchImporter playerName={playerName} />
+            {/* career highs */}
+            <section style={styles.section}>
+              <h3 style={styles.sectionTitle}>
+                SINGLE GAME RECORDS <span style={styles.sectionHint}>(career highs)</span>
+              </h3>
+              <div style={styles.cardGrid}>
+                <OverviewCard label="MOST ELIMS" value={overview.bestGameElims} icon="🏆" color="var(--green)" />
+                <OverviewCard label="BEST KD" value={`${fmt(overview.bestGameKD)}`} icon="⚔️" color="var(--accent)" />
+                <OverviewCard label="MOST DEATHS" value={overview.bestGameDeaths} icon="☠️" color="var(--red)" />
+                <OverviewCard label="MOST ASSISTS" value={overview.bestGameAssists} icon="🤝" color="var(--blue)" />
+                <OverviewCard label="MOST REVIVES" value={overview.bestGameRevives} icon="💉" color="var(--purple)" />
+                <OverviewCard label="MOST OBJECTIVES" value={overview.bestGameObjectives} icon="🎯" color="var(--accent)" />
+                <OverviewCard label="BEST COMBAT" value={overview.bestGameCombat.toLocaleString()} icon="⚡" color="var(--green)" />
+                <OverviewCard label="BEST OBJ SCORE" value={overview.bestGameObjScore.toLocaleString()} icon="📦" color="var(--blue)" />
+                <OverviewCard label="BEST SUPPORT" value={overview.bestGameSupport.toLocaleString()} icon="🛡️" color="var(--purple)" />
+                <OverviewCard label="BEST TOTAL SCORE" value={overview.bestGameTotal.toLocaleString()} icon="🏅" color="var(--accent)" />
+              </div>
+            </section>
+
+            {/* charts */}
+            {kdTrend.length >= 2 && (
+              <section style={styles.section}>
+                <div style={styles.chartsRow}>
+                  <KDTrendChart data={kdTrend} />
+                  <div style={styles.chartCard}>
+                    <h3 style={styles.sectionTitle}>
+                      SCORE BREAKDOWN <span style={styles.sectionHint}>(last {Math.min(kdTrend.length, 10)} games)</span>
+                    </h3>
+                    <ScoreBreakdownChart matches={[...matches].reverse().slice(-10)} />
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {tab === "today" && activeMatches.length === 0 && (
+              <section style={styles.section}>
+                <p
+                  style={{
+                    color: "var(--text-sub)",
+                    fontSize: 14,
+                    textAlign: "center",
+                    padding: "32px 0",
+                  }}
+                >
+                  No matches recorded today yet.
+                </p>
+              </section>
+            )}
+            <MapStatsTable matches={activeMatches} />
+            {(playedWith.length > 0 || playedAgainst.length > 0) && <PlayerEncountersTable playedWith={playedWith} playedAgainst={playedAgainst} />}
+
+            <MatchHistoryTable matches={activeMatches} />
+            <MatchImporter playerName={playerName} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -289,7 +302,12 @@ function EncounterSubTable({ title, data, color }: { title: string; data: [strin
 
   return (
     <div style={encTableWrap}>
-      <div style={{ padding: "12px 16px 0", borderBottom: "1px solid var(--border)" }}>
+      <div
+        style={{
+          padding: "12px 16px 0",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
         <span style={{ ...encSubTitle, color }}>{title}</span>
       </div>
       <table style={encTable}>
@@ -304,7 +322,15 @@ function EncounterSubTable({ title, data, color }: { title: string; data: [strin
         <tbody>
           {slice.length === 0 ? (
             <tr>
-              <td colSpan={4} style={{ ...encTd, color: "var(--text-muted)", textAlign: "center", padding: "20px 0" }}>
+              <td
+                colSpan={4}
+                style={{
+                  ...encTd,
+                  color: "var(--text-muted)",
+                  textAlign: "center",
+                  padding: "20px 0",
+                }}
+              >
                 Coming Soon
               </td>
             </tr>
@@ -312,9 +338,34 @@ function EncounterSubTable({ title, data, color }: { title: string; data: [strin
             slice.map(([name, count, wins, winDataCount], i) => (
               <tr key={name} style={encRow} onClick={() => navigate(`/player/${encodeURIComponent(name)}`)}>
                 <td style={{ ...encTd, color: "var(--text-muted)", width: 32 }}>{page * ENC_PAGE_SIZE + i + 1}</td>
-                <td style={{ ...encTd, color: "var(--accent)", cursor: "pointer" }}>{name}</td>
-                <td style={{ ...encTd, textAlign: "right", fontWeight: 600, color: "var(--green)" }}>{count}</td>
-                <td style={{ ...encTd, textAlign: "right", color: "var(--text-muted)" }}>{winDataCount > 0 ? `${Math.round((wins / winDataCount) * 100)}%` : "—"}</td>
+                <td
+                  style={{
+                    ...encTd,
+                    color: "var(--accent)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {name}
+                </td>
+                <td
+                  style={{
+                    ...encTd,
+                    textAlign: "right",
+                    fontWeight: 600,
+                    color: "var(--green)",
+                  }}
+                >
+                  {count}
+                </td>
+                <td
+                  style={{
+                    ...encTd,
+                    textAlign: "right",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {winDataCount > 0 ? `${Math.round((wins / winDataCount) * 100)}%` : "—"}
+                </td>
               </tr>
             ))
           )}
@@ -325,10 +376,23 @@ function EncounterSubTable({ title, data, color }: { title: string; data: [strin
           <button style={{ ...encPageBtn, opacity: page === 0 ? 0.35 : 1 }} disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
             ← PREV
           </button>
-          <span style={{ color: "var(--text-muted)", fontSize: 11, letterSpacing: 1 }}>
+          <span
+            style={{
+              color: "var(--text-muted)",
+              fontSize: 11,
+              letterSpacing: 1,
+            }}
+          >
             {page + 1} / {totalPages}
           </span>
-          <button style={{ ...encPageBtn, opacity: page === totalPages - 1 ? 0.35 : 1 }} disabled={page === totalPages - 1} onClick={() => setPage((p) => p + 1)}>
+          <button
+            style={{
+              ...encPageBtn,
+              opacity: page === totalPages - 1 ? 0.35 : 1,
+            }}
+            disabled={page === totalPages - 1}
+            onClick={() => setPage((p) => p + 1)}
+          >
             NEXT →
           </button>
         </div>
@@ -454,6 +518,32 @@ const activeTab: React.CSSProperties = {
 
 const inactiveTab: React.CSSProperties = {
   ...baseTab,
+};
+
+const liveActiveTab: React.CSSProperties = {
+  ...baseTab,
+  color: "var(--green)",
+  borderBottomColor: "var(--green)",
+  fontWeight: 700,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const liveInactiveTab: React.CSSProperties = {
+  ...baseTab,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const liveDot: React.CSSProperties = {
+  width: 7,
+  height: 7,
+  borderRadius: "50%",
+  background: "var(--green)",
+  flexShrink: 0,
+  boxShadow: "0 0 6px var(--green)",
 };
 
 // ── JSON Match Importer ─────────────────────────────────────────────────────

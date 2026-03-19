@@ -6,11 +6,15 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import ClearLiveStateReducer from "../clear_live_state_reducer";
 import DeleteMatchReducer from "../delete_match_reducer";
 import SubmitMatchReducer from "../submit_match_reducer";
+import UpdateLiveStateReducer from "../update_live_state_reducer";
 import UpdateMatchReducer from "../update_match_reducer";
 
+export type ClearLiveStateParams = __Infer<typeof ClearLiveStateReducer>;
 export type DeleteMatchParams = __Infer<typeof DeleteMatchReducer>;
 export type SubmitMatchParams = __Infer<typeof SubmitMatchReducer>;
+export type UpdateLiveStateParams = __Infer<typeof UpdateLiveStateReducer>;
 export type UpdateMatchParams = __Infer<typeof UpdateMatchReducer>;
 
