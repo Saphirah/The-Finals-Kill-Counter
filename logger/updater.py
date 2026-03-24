@@ -10,6 +10,7 @@ Never shows a console window (console=False in updater.spec).
 
 import argparse
 import ctypes
+import json
 import os
 import subprocess
 import sys
@@ -47,10 +48,11 @@ class UpdaterApp:
 
     _BG = "#1e1e1e"
 
-    def __init__(self, url: str, target_exe: str, main_pid: int) -> None:
+    def __init__(self, url: str, target_exe: str, main_pid: int, new_version: str) -> None:
         self.url = url
         self.target_exe = os.path.abspath(target_exe)
         self.main_pid = main_pid
+        self.new_version = new_version
 
         self.root = tk.Tk()
         self.root.title("Finals Kill Counter \u2013 Updating")
@@ -176,7 +178,23 @@ class UpdaterApp:
             except OSError:
                 pass
 
-            # Step 4 – re-launch the updated application
+            # Step 4 – persist the new version in fkc_update_state.json
+            state_path = os.path.join(target_dir, 'fkc_update_state.json')
+            try:
+                try:
+                    with open(state_path, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                except Exception:
+                    state = {}
+                state['version'] = self.new_version
+                # Remove any old 'declined' entry so the new version is a clean slate.
+                state.pop('declined', None)
+                with open(state_path, 'w', encoding='utf-8') as f:
+                    json.dump(state, f, indent=2)
+            except Exception as e:
+                print(f'[updater] Could not write update state: {e}')
+
+            # Step 5 – re-launch the updated application
             self._set_status("Update complete! Restarting\u2026")
             time.sleep(0.8)
             subprocess.Popen([self.target_exe], cwd=target_dir)
@@ -212,9 +230,10 @@ def main() -> None:
         sys.stderr = open(os.devnull, 'w')
 
     parser = argparse.ArgumentParser(description="FKC auto-updater (internal use)")
-    parser.add_argument("--url",    required=True,        help="Download URL of the update ZIP")
-    parser.add_argument("--target", required=True,        help="Absolute path to FinalsKillCounter.exe")
-    parser.add_argument("--pid",    required=True, type=int, help="PID of the running FKC process")
+    parser.add_argument("--url",     required=True,        help="Download URL of the update ZIP")
+    parser.add_argument("--target",  required=True,        help="Absolute path to FinalsKillCounter.exe")
+    parser.add_argument("--pid",     required=True, type=int, help="PID of the running FKC process")
+    parser.add_argument("--version", required=True,        help="New version tag being installed")
 
     try:
         args = parser.parse_args()
@@ -226,7 +245,7 @@ def main() -> None:
         )
         return
 
-    app = UpdaterApp(url=args.url, target_exe=args.target, main_pid=args.pid)
+    app = UpdaterApp(url=args.url, target_exe=args.target, main_pid=args.pid, new_version=args.version)
     app.run()
 
 

@@ -35,8 +35,7 @@ from image_utils import apply_color_mask, sanitize_ocr_lines
 _cfg = _load_app_config()
 
 # ── Auto-update settings ────────────────────────────────────────────────────
-CURRENT_VERSION = "0.1.0"
-_GITHUB_REPO    = "Saphirah/The-Finals-Kill-Counter"
+_GITHUB_REPO = "Saphirah/The-Finals-Kill-Counter"
 
 # SpacetimeDB upload settings
 SPACETIMEDB_HOST = 'https://maincloud.spacetimedb.com'
@@ -143,12 +142,11 @@ def _save_update_state(state: dict) -> None:
 def check_for_update() -> None:
     """Query GitHub for the latest release and prompt once per new version.
 
-    * If the latest tag is newer than CURRENT_VERSION a yes/no dialog is shown.
-    * If the user says **No**, the version is stored so the popup is never
-      shown again for that specific release tag.
-    * If the user says **Yes**, ``updater.exe`` is launched with the download
-      URL and the current process PID, then the main app exits so the updater
-      can replace the EXE.
+    * If fkc_update_state.json has no 'version' key (fresh install / first run)
+      we assume this IS the latest version, persist that tag, and skip the prompt.
+    * If a newer tag is found a yes/no dialog is shown once per tag.
+    * If the user says **Yes**, ``updater.exe`` is launched then the app exits
+      so the updater can replace the EXE and write the new version back.
     """
     try:
         api_url = f'https://api.github.com/repos/{_GITHUB_REPO}/releases'
@@ -175,12 +173,23 @@ def check_for_update() -> None:
     if not latest_tag:
         return
 
-    if _version_tuple(latest_tag) <= _version_tuple(CURRENT_VERSION):
-        print(f'[updater] Up to date (v{CURRENT_VERSION})')
+    state = _load_update_state()
+
+    # No version stored → fresh install or first run.
+    # Treat as up-to-date and record the latest tag so future runs can
+    # detect real updates.
+    if 'version' not in state:
+        state['version'] = latest_tag
+        _save_update_state(state)
+        print(f'[updater] First run – recording current version as v{latest_tag}')
+        return
+
+    current_version = state['version']
+    if _version_tuple(latest_tag) <= _version_tuple(current_version):
+        print(f'[updater] Up to date (v{current_version})')
         return
 
     # New version found – respect a previous "No" for this exact tag.
-    state = _load_update_state()
     if state.get('declined') == latest_tag:
         print(f'[updater] Update v{latest_tag} was previously declined – skipping')
         return
@@ -192,15 +201,14 @@ def check_for_update() -> None:
             zip_url = asset.get('browser_download_url')
             break
 
-    if not zip_url: 
+    if not zip_url:
         print(f'[updater] No zip asset found for release v{latest_tag}')
         return
 
-    # Show a simple yes/no dialog (no Tk root needed; messagebox creates one).
     answer = messagebox.askyesno(
         'Update Available',
         f'A new version of Finals Kill Counter is available!\n\n'
-        f'   Current : {CURRENT_VERSION}\n'
+        f'   Current : {current_version}\n'
         f'   Latest  : {latest_tag}\n\n'
         f'Download and install the update now?',
     )
@@ -211,13 +219,13 @@ def check_for_update() -> None:
         print(f'[updater] User declined update to v{latest_tag}')
         return
 
-    # Locate updater.exe (must sit next to FinalsKillCounter.exe in the dist/ folder).
+    # Locate updater.exe (must sit next to FinalsKillCounter.exe).
     if getattr(sys, 'frozen', False):
-        app_folder  = os.path.dirname(sys.executable)
-        target_exe  = sys.executable
+        app_folder = os.path.dirname(sys.executable)
+        target_exe = sys.executable
     else:
-        app_folder  = os.path.dirname(os.path.abspath(__file__))
-        target_exe  = os.path.join(app_folder, 'dist', 'FinalsKillCounter.exe')
+        app_folder = os.path.dirname(os.path.abspath(__file__))
+        target_exe = os.path.join(app_folder, 'dist', 'FinalsKillCounter.exe')
 
     updater_exe = os.path.join(app_folder, 'updater.exe')
 
@@ -232,9 +240,10 @@ def check_for_update() -> None:
     # Launch the updater, then exit so it can replace our EXE.
     subprocess.Popen([
         updater_exe,
-        '--url',    zip_url,
-        '--target', target_exe,
-        '--pid',    str(os.getpid()),
+        '--url',     zip_url,
+        '--target',  target_exe,
+        '--pid',     str(os.getpid()),
+        '--version', latest_tag,
     ])
     sys.exit(0)
 
