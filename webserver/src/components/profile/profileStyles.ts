@@ -294,10 +294,10 @@ export const styles = {
     marginBottom: 24,
     background:
       pct >= 0.6
-        ? "linear-gradient(135deg, rgba(76,175,80,0.15) 0%, var(--bg-card) 100%)"
+        ? "linear-gradient(135deg, rgba(5,139,190,0.15) 0%, var(--bg-card) 100%)"
         : pct >= 0.4
-          ? "linear-gradient(135deg, rgba(255,193,7,0.12) 0%, var(--bg-card) 100%)"
-          : "linear-gradient(135deg, rgba(244,67,54,0.15) 0%, var(--bg-card) 100%)",
+          ? "linear-gradient(135deg, rgba(250,191,43,0.12) 0%, var(--bg-card) 100%)"
+          : "linear-gradient(135deg, rgba(201,37,65,0.15) 0%, var(--bg-card) 100%)",
     display: "flex",
     alignItems: "center",
     gap: 24,
@@ -307,7 +307,7 @@ export const styles = {
     fontSize: 48,
     fontWeight: 700,
     lineHeight: 1,
-    color: pct >= 0.6 ? "var(--green)" : pct >= 0.4 ? "#f5c518" : "var(--red)",
+    color: pct >= 0.6 ? "var(--green)" : pct >= 0.4 ? "var(--accent)" : "var(--red)",
     flexShrink: 0,
   }),
   predictionLabel: {
@@ -331,8 +331,8 @@ export const styles = {
   },
   liveTeamHeader: (friendly: boolean) => ({
     padding: "12px 16px",
-    background: friendly ? "rgba(76,175,80,0.12)" : "rgba(244,67,54,0.12)",
-    borderBottom: `1px solid ${friendly ? "rgba(76,175,80,0.25)" : "rgba(244,67,54,0.25)"}`,
+    background: friendly ? "rgba(5,139,190,0.12)" : "rgba(201,37,65,0.12)",
+    borderBottom: `1px solid ${friendly ? "rgba(5,139,190,0.25)" : "rgba(201,37,65,0.25)"}`,
     fontFamily: "var(--font-head)",
     fontSize: 12,
     letterSpacing: 3,
@@ -378,9 +378,9 @@ export const styles = {
     textTransform: "uppercase" as const,
     padding: "2px 6px",
     borderRadius: 4,
-    background: variant === "new" ? "rgba(255,193,7,0.18)" : variant === "best" ? "rgba(76,175,80,0.18)" : variant === "danger" ? "rgba(244,67,54,0.18)" : "rgba(100,181,246,0.18)",
-    color: variant === "new" ? "#f5c518" : variant === "best" ? "var(--green)" : variant === "danger" ? "var(--red)" : "var(--accent)",
-    border: `1px solid ${variant === "new" ? "rgba(245,197,24,0.35)" : variant === "best" ? "rgba(76,175,80,0.35)" : variant === "danger" ? "rgba(244,67,54,0.35)" : "rgba(100,181,246,0.35)"}`,
+    background: variant === "new" ? "rgba(250,191,43,0.18)" : variant === "best" ? "rgba(5,139,190,0.18)" : variant === "danger" ? "rgba(201,37,65,0.18)" : "rgba(5,139,190,0.18)",
+    color: variant === "new" ? "var(--accent)" : variant === "best" ? "var(--green)" : variant === "danger" ? "var(--red)" : "var(--accent)",
+    border: `1px solid ${variant === "new" ? "rgba(250,191,43,0.35)" : variant === "best" ? "rgba(5,139,190,0.35)" : variant === "danger" ? "rgba(201,37,65,0.35)" : "rgba(5,139,190,0.35)"}`,
   }),
   livePlayerStats: {
     fontSize: 11,

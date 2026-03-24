@@ -4,6 +4,7 @@ import { DbConnection, tables } from "../../module_bindings";
 import { MatchEntry, MatchPlayer } from "../../module_bindings/types";
 import { kd, fmt, fmtDateTime, useSortable, isWin } from "./profileUtils";
 import { Th, MapCell } from "./atoms";
+import RenderPlayerName from "./RenderPlayerName";
 import { styles } from "./profileStyles";
 
 const PAGE_SIZE = 15;
@@ -131,7 +132,9 @@ function TeamList({ label, players, color }: { label: string; players: MatchPlay
         players.map((p, i) => (
           <div key={p.id.toString()} style={teamPlayerRow}>
             <span style={teamPlayerIndex}>{i + 1}</span>
-            <span style={teamPlayerName}>{p.name || "—"}</span>
+            <span style={{ display: "inline-block", maxWidth: 220 }}>
+              <RenderPlayerName name={p.name || "—"} style={teamPlayerName} />
+            </span>
           </div>
         ))
       )}
@@ -172,7 +175,7 @@ function DetailModal({ match, allMatchPlayers, onClose }: { match: MatchEntry; a
                 letterSpacing: 3,
                 padding: "4px 14px",
                 borderRadius: 6,
-                background: isWin(match.win) === true ? "rgba(0,200,100,0.15)" : "rgba(220,50,50,0.15)",
+                background: isWin(match.win) === true ? "rgba(5,139,190,0.15)" : "rgba(201,37,65,0.15)",
                 color: isWin(match.win) === true ? "var(--green)" : "var(--red)",
                 border: `1px solid ${isWin(match.win) === true ? "var(--green)" : "var(--red)"}`,
               }}
@@ -184,9 +187,9 @@ function DetailModal({ match, allMatchPlayers, onClose }: { match: MatchEntry; a
         <div style={detailStatsGrid}>
           <StatCell label="ELIMS" value={match.eliminations} color="var(--green)" />
           <StatCell label="DEATHS" value={match.deaths} color="var(--red)" />
-          <StatCell label="KD" value={fmt(matchKD)} color={matchKD >= 1 ? "var(--green)" : "var(--red)"} />
+          <StatCell label="KD" value={fmt(matchKD)} color="var(--accent)" />
           <StatCell label="ASSISTS" value={match.assists} color="var(--blue)" />
-          <StatCell label="REVIVES" value={match.revives} color="var(--purple)" />
+          <StatCell label="REVIVES" value={match.revives} color="var(--green)" />
           <StatCell label="OBJECTIVES" value={match.objectives} color="var(--accent)" />
           <StatCell label="COMBAT" value={match.combatScore?.toLocaleString()} />
           <StatCell label="OBJ SCORE" value={match.objectiveScore?.toLocaleString()} />
@@ -322,14 +325,14 @@ export function MatchHistoryTable({ matches }: { matches: MatchEntry[] }) {
                   <td
                     style={{
                       ...styles.tdNum,
-                      color: matchKD >= 1 ? "var(--green)" : "var(--red)",
+                      color: "var(--accent)",
                       fontWeight: 600,
                     }}
                   >
                     {fmt(matchKD)}
                   </td>
                   <td style={{ ...styles.tdNum, color: "var(--blue)" }}>{m.assists ?? "—"}</td>
-                  <td style={{ ...styles.tdNum, color: "var(--purple)" }}>{m.revives ?? "—"}</td>
+                  <td style={{ ...styles.tdNum, color: "var(--green)" }}>{m.revives ?? "—"}</td>
                   <td style={{ ...styles.tdNum, color: "var(--accent)" }}>{m.objectives ?? "—"}</td>
                   <td style={styles.tdNum}>{m.combatScore?.toLocaleString() ?? "—"}</td>
                   <td style={styles.tdNum}>{m.objectiveScore?.toLocaleString() ?? "—"}</td>

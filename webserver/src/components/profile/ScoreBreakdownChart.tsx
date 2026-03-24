@@ -22,9 +22,9 @@ export function ScoreBreakdownChart({ matches }: { matches: MatchEntry[] }) {
             fontSize: 11,
           }}
         />
-        <Bar dataKey="combat" stackId="a" fill="#f5a011" name="Combat" />
-        <Bar dataKey="objective" stackId="a" fill="#60a5fa" name="Objective" />
-        <Bar dataKey="support" stackId="a" fill="#4dde80" name="Support" />
+        <Bar dataKey="combat" stackId="a" fill="#fabf2b" name="Combat" />
+        <Bar dataKey="objective" stackId="a" fill="rgba(255,255,255,0.55)" name="Objective" />
+        <Bar dataKey="support" stackId="a" fill="#058bbe" name="Support" />
         <Legend formatter={(val) => <span style={{ color: "var(--text-sub)", fontSize: 11 }}>{val as string}</span>} />
       </BarChart>
     </ResponsiveContainer>

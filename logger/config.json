@@ -60,5 +60,9 @@
       "x2": 0.86,
       "y2": 0.1
     }
+  },
+  "end_screen_keywords": {
+    "win": ["WINNER", "SIEG"],
+    "loss": ["ELIMINATE", "ELIMINIERT"]
   }
 }

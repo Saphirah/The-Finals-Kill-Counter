@@ -86,6 +86,26 @@ ELIMINATED_WON_REGION_REL = regions_cfg.get('eliminated_won_region', {
     'x1': 0.74, 'y1': 0.0, 'x2': 0.86, 'y2': 0.1,
 })
 
+# End-screen headline keywords – loaded from config.json (supports multiple languages)
+_kw_cfg = _cfg.get('end_screen_keywords', {})
+END_SCREEN_WIN_KEYWORDS  = [k.upper() for k in _kw_cfg.get('win',  ['WINNERS'])]
+END_SCREEN_LOSS_KEYWORDS = [k.upper() for k in _kw_cfg.get('loss', ['ELIMINATED'])]
+
+
+def _keyword_match(text_upper: str, keywords: list[str]) -> bool:
+    """Return True if any keyword is found in *text_upper* via substring or fuzzy match.
+
+    - Substring: 'WINNERS' matches 'WINNERSQUAD' because WINNERS ⊆ WINNERSQUAD.
+    - Fuzzy: OCR typos like 'W1NNERS' are caught when similarity >= 0.80.
+    """
+    for kw in keywords:
+        if kw in text_upper:  # substring covers exact + embedded (e.g. WINNERSQUAD)
+            return True
+        for word in text_upper.split():
+            if difflib.SequenceMatcher(None, kw, word).ratio() >= 0.80:
+                return True
+    return False
+
 
 # ── Profile persistence ─────────────────────────────────────────────────────
 PROFILE_FILE = os.path.join(_app_dir(), 'profile.json')
@@ -860,9 +880,9 @@ class ScreenshotMonitor:
                         break
 
                     # Check the eliminated/winners headline region for the
-                    # end-screen marker using OCR + color masking. If it
-                    # contains 'WINNERS' or 'ELIMINATED' we consider the
-                    # end-screen present and take the final stats screenshot.
+                    # end-screen marker using OCR + color masking. A fuzzy
+                    # match against END_SCREEN_WIN/LOSS_KEYWORDS (config.json)
+                    # triggers the final stats capture.
                     try:
                         elim_img = self.capture_region(ELIMINATED_WON_REGION_REL)
                         processed_elim = apply_color_mask(elim_img, COLOR_RANGES_COUNTDOWN, invert=True)
@@ -873,8 +893,10 @@ class ScreenshotMonitor:
                         print(f"[{ts}] Eliminated/Winners OCR: '{elim_text}' (timeout in {remaining}s)")
 
                         up = elim_text.upper()
-                        if 'WINNERS' in up or 'ELIMINATED' in up:
-                            won = 'WINNERS' in up
+                        win_match  = _keyword_match(up, END_SCREEN_WIN_KEYWORDS)
+                        loss_match = _keyword_match(up, END_SCREEN_LOSS_KEYWORDS)
+                        if win_match or loss_match:
+                            won = win_match
                             print("✓ End-screen headline detected -> capturing final stats (win=%s)" % won)
 
                             # Full screenshot for stats extraction and logging

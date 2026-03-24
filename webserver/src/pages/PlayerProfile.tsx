@@ -11,17 +11,18 @@ import { MapStatsTable } from "../components/profile/MapStatsTable";
 import { MatchHistoryTable } from "../components/profile/MatchHistoryTable";
 import { PlayerHeader } from "../components/profile/PlayerHeader";
 import { LivePreview } from "../components/profile/LivePreview";
+import RenderPlayerName from "../components/profile/RenderPlayerName";
 
 export default function PlayerProfile() {
   const { name } = useParams<{ name: string }>();
   const playerName = decodeURIComponent(name ?? "");
   const navigate = useNavigate();
 
-  const [allMatches] = useTable(tables.matchEntry);
-  const [allMatchPlayers] = useTable(tables.matchPlayer);
+  const [allMatches, matchesReady] = useTable(tables.matchEntry.where((r) => r.playerName.eq(playerName)));
+  const [allMatchPlayers] = useTable(tables.matchEntry.where((r) => r.playerName.eq(playerName)).rightSemijoin(tables.matchPlayer, (me, mp) => me.id.eq(mp.matchId)));
   const [tab, setTab] = useState<"alltime" | "today" | "live">("alltime");
 
-  const matches = useMemo(() => allMatches.filter((m) => m.playerName === playerName).sort((a, b) => b.detectionTime.localeCompare(a.detectionTime)), [allMatches, playerName]);
+  const matches = useMemo(() => [...allMatches].sort((a, b) => b.detectionTime.localeCompare(a.detectionTime)), [allMatches]);
 
   const todayPrefix = useMemo(() => {
     const d = new Date();
@@ -81,13 +82,13 @@ export default function PlayerProfile() {
 
   const overview = useMemo(() => {
     const totalElims = sum(activeMatches.map((m) => m.eliminations));
-    const totalDeaths = sum(matches.map((m) => m.deaths));
-    const totalAssists = sum(matches.map((m) => m.assists));
-    const totalRevives = sum(matches.map((m) => m.revives));
-    const totalObjectives = sum(matches.map((m) => m.objectives));
-    const totalCombat = sum(matches.map((m) => m.combatScore));
-    const totalObj = sum(matches.map((m) => m.objectiveScore));
-    const totalSupport = sum(matches.map((m) => m.supportScore));
+    const totalDeaths = sum(activeMatches.map((m) => m.deaths));
+    const totalAssists = sum(activeMatches.map((m) => m.assists));
+    const totalRevives = sum(activeMatches.map((m) => m.revives));
+    const totalObjectives = sum(activeMatches.map((m) => m.objectives));
+    const totalCombat = sum(activeMatches.map((m) => m.combatScore));
+    const totalObj = sum(activeMatches.map((m) => m.objectiveScore));
+    const totalSupport = sum(activeMatches.map((m) => m.supportScore));
     const totalScore = totalCombat + totalObj + totalSupport;
 
     const n = activeMatches.length;
@@ -121,6 +122,9 @@ export default function PlayerProfile() {
     const bestGameObjScore = Math.max(...activeMatches.map((m) => m.objectiveScore ?? 0), 0);
     const bestGameSupport = Math.max(...activeMatches.map((m) => m.supportScore ?? 0), 0);
     const bestGameTotal = Math.max(...activeMatches.map((m) => (m.combatScore ?? 0) + (m.objectiveScore ?? 0) + (m.supportScore ?? 0)), 0);
+    const wins = activeMatches.filter((m) => isWin(m.win) !== undefined && isWin(m.win)).length;
+    const losses = activeMatches.filter((m) => isWin(m.win) !== undefined && !isWin(m.win)).length;
+    const avgWinrate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0;
 
     return {
       games: n,
@@ -146,6 +150,7 @@ export default function PlayerProfile() {
       bestGameObjScore,
       bestGameSupport,
       bestGameTotal,
+      avgWinrate,
     };
   }, [activeMatches]);
 
@@ -162,7 +167,7 @@ export default function PlayerProfile() {
       }));
   }, [activeMatches]);
 
-  if (matches.length === 0 && allMatches.length > 0) {
+  if (matches.length === 0 && matchesReady) {
     return (
       <div
         style={{
@@ -214,7 +219,7 @@ export default function PlayerProfile() {
                 <SummaryBadge label="Total Elims" value={overview.totalElims} color="var(--green)" />
                 <SummaryBadge label="Total Deaths" value={overview.totalDeaths} color="var(--red)" />
                 <SummaryBadge label="Total Assists" value={overview.totalAssists} color="var(--blue)" />
-                <SummaryBadge label="Total Revives" value={overview.totalRevives} color="var(--purple)" />
+                <SummaryBadge label="Total Revives" value={overview.totalRevives} color="var(--green)" />
                 <SummaryBadge label="Total Objectives" value={overview.totalObjectives} color="var(--accent)" />
               </div>
             </section>
@@ -222,11 +227,12 @@ export default function PlayerProfile() {
             <section style={styles.section}>
               <h3 style={styles.sectionTitle}>GLOBAL AVERAGES</h3>
               <div style={styles.cardGrid}>
-                <OverviewCard label="OVERALL KD" value={fmt(overview.avgKD)} icon="⚔️" color={overview.avgKD >= 1 ? "var(--green)" : "var(--red)"} />
+                <OverviewCard label="OVERALL KD" value={fmt(overview.avgKD)} icon="⚔️" color="var(--accent)" />
                 <OverviewCard label="AVG ELIMS" value={fmt(overview.avgElims, 1)} icon="💀" color="var(--green)" />
                 <OverviewCard label="AVG DEATHS" value={fmt(overview.avgDeaths, 1)} icon="☠️" color="var(--red)" />
                 <OverviewCard label="AVG ASSISTS" value={fmt(overview.avgAssists, 1)} icon="🤝" color="var(--blue)" />
                 <OverviewCard label="AVG SCORE" value={Math.round(overview.avgScore).toLocaleString()} icon="🏆" color="var(--accent)" />
+                <OverviewCard label="GLOBAL WINRATE" value={`${Math.round(overview.avgWinrate)}%`} icon="🏆" color="var(--accent)" />
               </div>
             </section>
 
@@ -240,11 +246,11 @@ export default function PlayerProfile() {
                 <OverviewCard label="BEST KD" value={`${fmt(overview.bestGameKD)}`} icon="⚔️" color="var(--accent)" />
                 <OverviewCard label="MOST DEATHS" value={overview.bestGameDeaths} icon="☠️" color="var(--red)" />
                 <OverviewCard label="MOST ASSISTS" value={overview.bestGameAssists} icon="🤝" color="var(--blue)" />
-                <OverviewCard label="MOST REVIVES" value={overview.bestGameRevives} icon="💉" color="var(--purple)" />
+                <OverviewCard label="MOST REVIVES" value={overview.bestGameRevives} icon="💉" color="var(--green)" />
                 <OverviewCard label="MOST OBJECTIVES" value={overview.bestGameObjectives} icon="🎯" color="var(--accent)" />
-                <OverviewCard label="BEST COMBAT" value={overview.bestGameCombat.toLocaleString()} icon="⚡" color="var(--green)" />
-                <OverviewCard label="BEST OBJ SCORE" value={overview.bestGameObjScore.toLocaleString()} icon="📦" color="var(--blue)" />
-                <OverviewCard label="BEST SUPPORT" value={overview.bestGameSupport.toLocaleString()} icon="🛡️" color="var(--purple)" />
+                <OverviewCard label="BEST COMBAT" value={overview.bestGameCombat.toLocaleString()} icon="⚡" color="var(--text)" />
+                <OverviewCard label="BEST OBJ SCORE" value={overview.bestGameObjScore.toLocaleString()} icon="📦" color="var(--text)" />
+                <OverviewCard label="BEST SUPPORT" value={overview.bestGameSupport.toLocaleString()} icon="🛡️" color="var(--text)" />
                 <OverviewCard label="BEST TOTAL SCORE" value={overview.bestGameTotal.toLocaleString()} icon="🏅" color="var(--accent)" />
               </div>
             </section>
@@ -289,6 +295,8 @@ export default function PlayerProfile() {
     </div>
   );
 }
+
+// Use shared RenderPlayerName from components/profile
 
 // ── Player Encounters Table ─────────────────────────────────────────────────
 
@@ -341,18 +349,18 @@ function EncounterSubTable({ title, data, color }: { title: string; data: [strin
                 <td
                   style={{
                     ...encTd,
-                    color: "var(--accent)",
+                    color: "var(--text)",
                     cursor: "pointer",
                   }}
                 >
-                  {name}
+                  <RenderPlayerName name={name} />
                 </td>
                 <td
                   style={{
                     ...encTd,
                     textAlign: "right",
                     fontWeight: 600,
-                    color: "var(--green)",
+                    color: "var(--text)",
                   }}
                 >
                   {count}

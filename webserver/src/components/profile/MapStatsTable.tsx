@@ -75,7 +75,7 @@ export function MapStatsTable({ matches }: { matches: MatchEntry[] }) {
                 <td
                   style={{
                     ...styles.tdNum,
-                    color: row.avgKD >= 1 ? "var(--green)" : "var(--red)",
+                    color: "var(--accent)",
                     fontWeight: 600,
                   }}
                 >
@@ -96,7 +96,7 @@ export function MapStatsTable({ matches }: { matches: MatchEntry[] }) {
                 >
                   {Math.round(row.avgTotal).toLocaleString()}
                 </td>
-                <td style={{ ...styles.tdNum, color: "var(--purple)" }}>{fmt(row.avgRevives, 1)}</td>
+                <td style={{ ...styles.tdNum, color: "var(--green)" }}>{fmt(row.avgRevives, 1)}</td>
                 <td
                   style={{
                     ...styles.tdNum,

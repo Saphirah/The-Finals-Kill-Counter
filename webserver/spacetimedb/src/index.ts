@@ -2,6 +2,19 @@ import { schema, table, t } from "spacetimedb/server";
 
 type NamedPlayer = { name: string };
 
+// FNV-1a 64-bit deterministic hash — used to generate stable IDs from content
+// so that concurrent submissions of the same data produce the same key and the
+// second insert is silently swallowed rather than racing to a conflict.
+function deterministicId(key: string): bigint {
+  let hash = 14695981039346656037n;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= BigInt(key.charCodeAt(i));
+    hash = (hash * 1099511628211n) & 0xffffffffffffffffn;
+  }
+  // Avoid 0n — reserved as an "unset" placeholder in several places
+  return hash === 0n ? 1n : hash;
+}
+
 const Player = table(
   { name: "player", public: true },
   {
@@ -28,7 +41,7 @@ const MatchEntry = table(
     ],
   },
   {
-    id: t.u64().primaryKey().autoInc(),
+    id: t.u64().primaryKey(),
     playerName: t.string(),
     detectionTime: t.string(),
     map: t.string().optional(),
@@ -58,7 +71,7 @@ const MatchPlayer = table(
     ],
   },
   {
-    id: t.u64().primaryKey().autoInc(),
+    id: t.u64().primaryKey(),
     matchId: t.u64(),
     name: t.string(),
     friendly: t.bool(),
@@ -105,49 +118,44 @@ export const submit_match = spacetimedb.reducer(
     enemyPlayers: t.string(),
   },
   (ctx, args) => {
-    // Reject duplicate: same player + detectionTime already in the table.
-    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(
-      args.playerName,
-    )) {
-      if (entry.detectionTime === args.detectionTime) {
-        // Silently return — duplicate, no insert.
-        return;
-      }
-    }
+    // Derive a stable, deterministic ID from the natural key (player + time).
+    // Two concurrent submissions of the same data will compute the same ID, so
+    // whichever reducer wins the race inserts successfully and the other's
+    // try-catch swallows the duplicate-key error — fully idempotent.
+    const matchEntryId = deterministicId(args.playerName + ":" + args.detectionTime);
 
-    if (!ctx.db.player.name.find(args.playerName)) {
+    try {
       ctx.db.player.insert({ name: args.playerName });
+    } catch {
+      // Player already exists — harmless.
     }
-    const opt = (v: number) => (v >= 0 ? v : undefined);
-    ctx.db.matchEntry.insert({
-      id: 0n,
-      playerName: args.playerName,
-      detectionTime: args.detectionTime,
-      map: args.map || undefined,
-      win: args.win ? { tag: "win" } : { tag: "loss" },
-      similarityScore: args.similarityScore,
-      combatScore: opt(args.combatScore),
-      objectiveScore: opt(args.objectiveScore),
-      supportScore: opt(args.supportScore),
-      eliminations: opt(args.eliminations),
-      assists: opt(args.assists),
-      deaths: opt(args.deaths),
-      revives: opt(args.revives),
-      objectives: opt(args.objectives),
-    });
 
-    // Find the newly inserted match to get its auto-generated id.
-    let matchId = 0n;
-    for (const entry of ctx.db.matchEntry.match_entry_player_name.filter(
-      args.playerName,
-    )) {
-      if (entry.detectionTime === args.detectionTime) {
-        matchId = entry.id;
-        break;
-      }
+    const opt = (v: number) => (v >= 0 ? v : undefined);
+    try {
+      ctx.db.matchEntry.insert({
+        id: matchEntryId,
+        playerName: args.playerName,
+        detectionTime: args.detectionTime,
+        map: args.map || undefined,
+        win: args.win ? { tag: "win" } : { tag: "loss" },
+        similarityScore: args.similarityScore,
+        combatScore: opt(args.combatScore),
+        objectiveScore: opt(args.objectiveScore),
+        supportScore: opt(args.supportScore),
+        eliminations: opt(args.eliminations),
+        assists: opt(args.assists),
+        deaths: opt(args.deaths),
+        revives: opt(args.revives),
+        objectives: opt(args.objectives),
+      });
+    } catch {
+      // Duplicate match entry — another concurrent submission already inserted it.
+      return;
     }
 
     // Insert friendly and enemy players into the MatchPlayer table.
+    // IDs are derived from (matchId + playerName + side) so concurrent duplicate
+    // submissions for the same match produce the same keys and are silently ignored.
     const insertPlayers = (json: string, friendly: boolean) => {
       let players: NamedPlayer[] = [];
       try {
@@ -157,12 +165,17 @@ export const submit_match = spacetimedb.reducer(
       }
       for (const p of players) {
         if (p && typeof p.name === "string") {
-          ctx.db.matchPlayer.insert({
-            id: 0n,
-            matchId,
-            name: p.name,
-            friendly,
-          });
+          const playerId = deterministicId(matchEntryId.toString() + ":" + p.name + ":" + (friendly ? "1" : "0"));
+          try {
+            ctx.db.matchPlayer.insert({
+              id: playerId,
+              matchId: matchEntryId,
+              name: p.name,
+              friendly,
+            });
+          } catch {
+            // Duplicate match-player row — ignore.
+          }
         }
       }
     };
@@ -171,18 +184,15 @@ export const submit_match = spacetimedb.reducer(
   },
 );
 
-export const delete_match = spacetimedb.reducer(
-  { id: t.u64() },
-  (ctx, { id }) => {
-    const existing = ctx.db.matchEntry.id.find(id);
-    if (!existing) return;
-    ctx.db.matchEntry.id.delete(id);
-    // Delete all associated MatchPlayer rows.
-    for (const mp of ctx.db.matchPlayer.match_player_match_id.filter(id)) {
-      ctx.db.matchPlayer.id.delete(mp.id);
-    }
-  },
-);
+export const delete_match = spacetimedb.reducer({ id: t.u64() }, (ctx, { id }) => {
+  const existing = ctx.db.matchEntry.id.find(id);
+  if (!existing) return;
+  ctx.db.matchEntry.id.delete(id);
+  // Delete all associated MatchPlayer rows.
+  for (const mp of ctx.db.matchPlayer.match_player_match_id.filter(id)) {
+    ctx.db.matchPlayer.id.delete(mp.id);
+  }
+});
 
 export const update_match = spacetimedb.reducer(
   {

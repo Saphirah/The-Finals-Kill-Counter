@@ -4,6 +4,7 @@ import { tables } from "../../module_bindings";
 import type { MatchEntry, MatchPlayer } from "../../module_bindings/types";
 import { isWin } from "./profileUtils";
 import { styles } from "./profileStyles";
+import RenderPlayerName from "./RenderPlayerName";
 import { getMapImage } from "../../constants/mapImages";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -158,9 +159,9 @@ function PlayerSlotRow({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            color: isYou ? "#f5c518" : undefined,
+            color: isYou ? "var(--accent)" : undefined,
           };
-          return <span style={nameStyle}>{slot.name}</span>;
+          return <RenderPlayerName name={slot.name} style={nameStyle} />;
         })()}
         {isNew && <span style={styles.liveBadge("new")}>NEW</span>}
         {isBest && <span style={styles.liveBadge("best")}>★ Best Ally</span>}

@@ -4,6 +4,7 @@ import { useTable } from "spacetimedb/react";
 import { tables } from "../module_bindings";
 import { useSpacetimeDB } from "spacetimedb/react";
 import { getMapImage } from "../constants/mapImages";
+import RenderPlayerName from "../components/profile/RenderPlayerName";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function kd(elims: number, deaths: number) {
@@ -85,8 +86,8 @@ export default function PlayersPage() {
           <div
             style={{
               ...styles.badge,
-              background: connected ? "#0d2e1a" : "#2e0d0d",
-              color: connected ? "#4dde80" : "#e84040",
+              background: connected ? "rgba(5,139,190,0.15)" : "rgba(201,37,65,0.15)",
+              color: connected ? "var(--green)" : "var(--red)",
             }}
           >
             <span
@@ -167,7 +168,9 @@ function PlayerCard({ p, onClick }: { p: PlayerStat; onClick: () => void }) {
       <div style={styles.cardBody}>
         {/* initials avatar */}
         <div style={styles.avatar}>{p.name.slice(0, 2).toUpperCase()}</div>
-        <h2 style={styles.playerName}>{p.name}</h2>
+        <h2 style={styles.playerName}>
+          <RenderPlayerName name={p.name} />
+        </h2>
 
         {p.lastMatch && <p style={styles.lastSeen}>Last match: {toTime(p.lastMatch)}</p>}
 

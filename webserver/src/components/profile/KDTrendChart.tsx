@@ -22,9 +22,9 @@ export function KDTrendChart({ data }: { data: KDTrendPoint[] }) {
           <XAxis dataKey="game" tick={{ fontSize: 10 }} />
           <YAxis tick={{ fontSize: 10 }} />
           <Tooltip content={<KDTooltip />} />
-          <Line type="monotone" dataKey="kd" stroke="#f5a011" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          <Line type="monotone" dataKey="elims" stroke="#4dde80" strokeWidth={1} dot={false} strokeDasharray="4 2" />
-          <Line type="monotone" dataKey="deaths" stroke="#e84040" strokeWidth={1} dot={false} strokeDasharray="4 2" />
+          <Line type="monotone" dataKey="kd" stroke="#fabf2b" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          <Line type="monotone" dataKey="elims" stroke="#058bbe" strokeWidth={1} dot={false} strokeDasharray="4 2" />
+          <Line type="monotone" dataKey="deaths" stroke="#c92541" strokeWidth={1} dot={false} strokeDasharray="4 2" />
           <Legend formatter={(val) => <span style={{ color: "var(--text-sub)", fontSize: 11 }}>{(val as string).toUpperCase()}</span>} />
         </LineChart>
       </ResponsiveContainer>
