@@ -100,9 +100,9 @@ def main():
             shutil.rmtree(folder)
             print(f'✓ Removed old {folder}/')
 
-    # --- Run PyInstaller ----------------------------------------------------
+    # --- Run PyInstaller: main app ------------------------------------------
     print()
-    print('Running PyInstaller …')
+    print('Running PyInstaller (FinalsKillCounter) …')
     result = subprocess.run(
         [sys.executable, '-m', 'PyInstaller', 'FKC.spec', '--noconfirm'],
     )
@@ -112,9 +112,23 @@ def main():
         print('✗ Build FAILED — check the output above for errors.')
         sys.exit(1)
 
+    # --- Run PyInstaller: auto-updater --------------------------------------
+    print()
+    print('Running PyInstaller (updater) …')
+    result_updater = subprocess.run(
+        [sys.executable, '-m', 'PyInstaller', 'updater.spec', '--noconfirm'],
+    )
+
+    if result_updater.returncode != 0:
+        print()
+        print('✗ Updater build FAILED — check the output above for errors.')
+        sys.exit(1)
+
     exe_path = os.path.join('dist', 'FinalsKillCounter.exe')
+    updater_path = os.path.join('dist', 'updater.exe')
     dist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dist')
     size_mb = os.path.getsize(exe_path) / (1024 * 1024) if os.path.isfile(exe_path) else 0
+    updater_mb = os.path.getsize(updater_path) / (1024 * 1024) if os.path.isfile(updater_path) else 0
 
     # --- Copy runtime files into dist/ --------------------------------------
     print()
@@ -125,12 +139,15 @@ def main():
     print('=' * 60)
     print('✓  Build successful!')
     print(f'   Output : dist\\FinalsKillCounter.exe  ({size_mb:.1f} MB)')
+    print(f'           dist\\updater.exe             ({updater_mb:.1f} MB)')
     print()
     print('   To use the EXE:')
-    print('   1. Copy the entire  dist\\  folder (EXE + config.json) anywhere.')
+    print('   1. Copy the entire  dist\\  folder (both EXEs + config.json) anywhere.')
     print('   2. Double-click FinalsKillCounter.exe.  A tray icon will appear.')
     print('      Right-click it for  "Toggle Overlay"  and  "Quit".')
     print('      Home key also toggles the overlay.')
+    print('   3. updater.exe must remain alongside FinalsKillCounter.exe for')
+    print('      auto-updates to work.')
     print('=' * 60)
 
 

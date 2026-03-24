@@ -18,6 +18,7 @@ import tkinter as tk
 import ctypes
 import signal
 import sys
+import subprocess
 import urllib.request
 import urllib.error
 from PIL import ImageGrab, Image, ImageTk, ImageDraw
@@ -32,6 +33,10 @@ from image_utils import apply_color_mask, sanitize_ocr_lines
 
 
 _cfg = _load_app_config()
+
+# ── Auto-update settings ────────────────────────────────────────────────────
+CURRENT_VERSION = "0.1.0"
+_GITHUB_REPO    = "Saphirah/The-Finals-Kill-Counter"
 
 # SpacetimeDB upload settings
 SPACETIMEDB_HOST = 'https://maincloud.spacetimedb.com'
@@ -105,6 +110,133 @@ def _keyword_match(text_upper: str, keywords: list[str]) -> bool:
             if difflib.SequenceMatcher(None, kw, word).ratio() >= 0.80:
                 return True
     return False
+
+
+# ── Auto-update helpers ─────────────────────────────────────────────────────
+
+def _version_tuple(ver: str) -> tuple:
+    """Convert a version string like '1.2.3' to a comparable tuple (1, 2, 3)."""
+    try:
+        return tuple(int(x) for x in ver.lstrip('v').split('.'))
+    except ValueError:
+        return (0,)
+
+
+def _load_update_state() -> dict:
+    path = os.path.join(_app_dir(), 'fkc_update_state.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_update_state(state: dict) -> None:
+    path = os.path.join(_app_dir(), 'fkc_update_state.json')
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f'[updater] Could not save update state: {e}')
+
+
+def check_for_update() -> None:
+    """Query GitHub for the latest release and prompt once per new version.
+
+    * If the latest tag is newer than CURRENT_VERSION a yes/no dialog is shown.
+    * If the user says **No**, the version is stored so the popup is never
+      shown again for that specific release tag.
+    * If the user says **Yes**, ``updater.exe`` is launched with the download
+      URL and the current process PID, then the main app exits so the updater
+      can replace the EXE.
+    """
+    try:
+        api_url = f'https://api.github.com/repos/{_GITHUB_REPO}/releases'
+        req = urllib.request.Request(
+            api_url,
+            headers={'User-Agent': 'FKC-AutoUpdater/1.0'},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            releases = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        print(f'[updater] Could not reach GitHub: {e}')
+        return
+
+    # Pick the most recent non-draft release (pre-releases are included).
+    data = next(
+        (r for r in releases if not r.get('draft', False)),
+        None,
+    )
+    if not data:
+        print('[updater] No releases found on GitHub')
+        return
+
+    latest_tag = data.get('tag_name', '').strip().lstrip('v')
+    if not latest_tag:
+        return
+
+    if _version_tuple(latest_tag) <= _version_tuple(CURRENT_VERSION):
+        print(f'[updater] Up to date (v{CURRENT_VERSION})')
+        return
+
+    # New version found – respect a previous "No" for this exact tag.
+    state = _load_update_state()
+    if state.get('declined') == latest_tag:
+        print(f'[updater] Update v{latest_tag} was previously declined – skipping')
+        return
+
+    # Locate the zip asset.
+    zip_url: str | None = None
+    for asset in data.get('assets', []):
+        if asset.get('name', '').lower().endswith('.zip'):
+            zip_url = asset.get('browser_download_url')
+            break
+
+    if not zip_url: 
+        print(f'[updater] No zip asset found for release v{latest_tag}')
+        return
+
+    # Show a simple yes/no dialog (no Tk root needed; messagebox creates one).
+    answer = messagebox.askyesno(
+        'Update Available',
+        f'A new version of Finals Kill Counter is available!\n\n'
+        f'   Current : {CURRENT_VERSION}\n'
+        f'   Latest  : {latest_tag}\n\n'
+        f'Download and install the update now?',
+    )
+
+    if not answer:
+        state['declined'] = latest_tag
+        _save_update_state(state)
+        print(f'[updater] User declined update to v{latest_tag}')
+        return
+
+    # Locate updater.exe (must sit next to FinalsKillCounter.exe in the dist/ folder).
+    if getattr(sys, 'frozen', False):
+        app_folder  = os.path.dirname(sys.executable)
+        target_exe  = sys.executable
+    else:
+        app_folder  = os.path.dirname(os.path.abspath(__file__))
+        target_exe  = os.path.join(app_folder, 'dist', 'FinalsKillCounter.exe')
+
+    updater_exe = os.path.join(app_folder, 'updater.exe')
+
+    if not os.path.isfile(updater_exe):
+        messagebox.showerror(
+            'Updater Not Found',
+            'updater.exe was not found next to FinalsKillCounter.exe.\n'
+            f'Please update manually:\n{zip_url}',
+        )
+        return
+
+    # Launch the updater, then exit so it can replace our EXE.
+    subprocess.Popen([
+        updater_exe,
+        '--url',    zip_url,
+        '--target', target_exe,
+        '--pid',    str(os.getpid()),
+    ])
+    sys.exit(0)
 
 
 # ── Profile persistence ─────────────────────────────────────────────────────
@@ -485,18 +617,33 @@ class ScreenshotMonitor:
         print(f"[TAB] Could not match '{text}' to any known map — ignoring")
         return None
 
+    # Matches a trailing "number" that may contain OCR '1' misreads (l, I, |).
+    # Always anchored to the end of a line because the stat value is the last token.
+    _STAT_END_RE  = re.compile(r'[\d,lI|]+\s*$')
+    # Characters Tesseract commonly returns instead of the digit '1'.
+    _OCR_ONE_RE   = re.compile(r'[lI|]')
+
     def parse_stats(self, text):
         """Parse OCR text lines positionally into a stats dict.
 
-        Line order is reliable even when Tesseract mis-reads individual words,
-        so we extract the first number from each line in order.
+        Line order is reliable even when Tesseract mis-reads individual words.
+        The numeric value is **always the last token** on each line, so we
+        anchor the search to the end of the line.  Tesseract frequently
+        returns 'l', 'I', or '|' instead of '1'; those are normalised before
+        the integer is extracted.
         """
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         stats = {}
         for i, key in enumerate(STAT_KEYS):
             if i < len(lines):
-                m = re.search(r'[\d,]+', lines[i])
-                stats[key] = int(m.group().replace(',', '')) if m else None
+                m = self._STAT_END_RE.search(lines[i])
+                if m:
+                    # Normalise OCR '1' misreads, then keep only digits and commas.
+                    normalised = self._OCR_ONE_RE.sub('1', m.group().strip())
+                    digits = re.sub(r'[^0-9]', '', normalised)
+                    stats[key] = int(digits) if digits else None
+                else:
+                    stats[key] = None
             else:
                 stats[key] = None
         return stats
@@ -954,6 +1101,9 @@ def main():
     pytesseract.pytesseract.tesseract_cmd = _get_tesseract_path()
 
     profile_name = get_or_create_profile()
+
+    # Check for updates (non-blocking: silently skips on network failure).
+    check_for_update()
 
     try:
         monitor = ScreenshotMonitor(profile_name=profile_name)
