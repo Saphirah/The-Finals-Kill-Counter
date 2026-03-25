@@ -64,5 +64,40 @@
   "end_screen_keywords": {
     "win": ["WINNER", "SIEG"],
     "loss": ["ELIMINATE", "ELIMINIERT"]
+  },
+  "ocr_replacements": {
+    "countdown_region_rel": {
+      ";": ":",
+      "O": "0",
+      "o": "0"
+    },
+    "players_tab_region": {
+      "tag": {
+        "S": "9",
+        "s": "9",
+        "T": "1",
+        "A": "4",
+        "O": "0",
+        "o": "0",
+        "I": "1",
+        "Z": "2",
+        "B": "8",
+        "G": "6"
+      }
+    },
+    "map_region_rel": {},
+    "crop_bounds_rel": {
+      "|": "1",
+      "l": "1",
+      "I": "1",
+      "O": "0",
+      "o": "0",
+      "S": "5",
+      "Z": "2",
+      "B": "8",
+      "G": "6",
+      "g": "9"
+    },
+    "eliminated_won_region": {}
   }
 }

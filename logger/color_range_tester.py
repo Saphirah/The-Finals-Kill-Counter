@@ -19,15 +19,17 @@ Dependencies: opencv-python, pillow, numpy
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from PIL import Image, ImageTk, ImageGrab
 import cv2
 import numpy as np
-import json
 import os
 import threading
 import time
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+from config_utils import _load_app_config, save_config, init_tesseract
+from image_utils import apply_color_mask, capture_region, run_ocr, bgr_to_photo, load_ocr_replacements
+
+init_tesseract()
+load_ocr_replacements(_load_app_config())
 
 # Protected keys which should not be deleted because other code depends on them
 PROTECTED_COLOR_KEYS = ['color_ranges_endscreen', 'color_ranges_map', 'color_ranges_countdown']
@@ -47,50 +49,6 @@ def simple_input(parent, prompt):
     return simpledialog.askstring('Input', prompt, parent=parent)
 
 
-# ── Config helpers ────────────────────────────────────────────────────────────
-
-def load_config():
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as exc:
-        messagebox.showerror('Config error', f'Could not load config.json:\n{exc}')
-        return {}
-
-
-def save_config(cfg):
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, indent=2)
-
-
-# ── Image processing helpers ──────────────────────────────────────────────────
-
-def _apply_single(image_bgr, lower_hsv, upper_hsv, invert=False):
-    hsv  = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array(lower_hsv, np.uint8), np.array(upper_hsv, np.uint8))
-    if invert:
-        mask = cv2.bitwise_not(mask)
-    out = np.zeros_like(image_bgr)
-    out[mask > 0] = [255, 255, 255]
-    return out
-
-
-def _apply_all(image_bgr, ranges_list, invert=False):
-    """Apply multiple HSV ranges (OR-combined) from a list of [lo, hi] pairs."""
-    hsv      = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    combined = np.zeros(image_bgr.shape[:2], dtype=np.uint8)
-    for lo, hi in ranges_list:
-        combined = cv2.bitwise_or(
-            combined,
-            cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
-        )
-    if invert:
-        combined = cv2.bitwise_not(combined)
-    out = np.zeros_like(image_bgr)
-    out[combined > 0] = [255, 255, 255]
-    return out
-
-
 # ── Main application ──────────────────────────────────────────────────────────
 
 class ColorRangeTester(tk.Tk):
@@ -101,7 +59,7 @@ class ColorRangeTester(tk.Tk):
         self.geometry('1140x700')
         self.minsize(900, 600)
 
-        self.cfg          = load_config()
+        self.cfg          = _load_app_config()
         self.cv_image     = None
         self.processed_cv = None
         self._live_running = False
@@ -126,7 +84,7 @@ class ColorRangeTester(tk.Tk):
     def _build_image_tab(self):
         tab = self._tab_image
 
-        ctrl = tk.Frame(tab, width=210)
+        ctrl = tk.Frame(tab, width=280)
         ctrl.pack(side='left', fill='y', padx=8, pady=8)
         ctrl.pack_propagate(False)
 
@@ -138,70 +96,64 @@ class ColorRangeTester(tk.Tk):
         tk.Label(ctrl, text='Range Set').pack(anchor='w')
         sets = _list_color_sets(self.cfg)
         if not sets:
-            # ensure at least defaults exist in config
             self.cfg.setdefault('color_ranges', {})
             sets = _list_color_sets(self.cfg)
         self._set_var = tk.StringVar(value=sets[0] if sets else '')
         set_cb = ttk.Combobox(ctrl, textvariable=self._set_var, values=sets,
-                               state='readonly', width=24)
+                               state='readonly', width=30)
         set_cb.pack(fill='x', pady=2)
         set_cb.bind('<<ComboboxSelected>>', lambda e: self._on_set_changed())
 
         # Create / delete color set
         row_cd = tk.Frame(ctrl)
         row_cd.pack(fill='x', pady=4)
-        tk.Button(row_cd, text='New Set', width=10, command=self._new_color_set).pack(side='left')
+        tk.Button(row_cd, text='New Set',    width=10, command=self._new_color_set).pack(side='left')
         tk.Button(row_cd, text='Delete Set', width=10, command=self._delete_color_set).pack(side='left', padx=4)
-
-        tk.Label(ctrl, text='Range Index').pack(anchor='w', pady=(6, 0))
-        idx_row = tk.Frame(ctrl)
-        idx_row.pack(fill='x')
-        self._idx_var  = tk.IntVar(value=0)
-        self._idx_spin = tk.Spinbox(idx_row, from_=0, to=10, textvariable=self._idx_var,
-                         width=4, command=self._on_idx_changed)
-        self._idx_spin.pack(side='left')
-        tk.Button(idx_row, text='+', width=2, command=self._add_range).pack(side='left', padx=2)
-        tk.Button(idx_row, text='−', width=2, command=self._remove_range).pack(side='left')
-
-        ttk.Separator(ctrl, orient='horizontal').pack(fill='x', pady=8)
-
-        tk.Label(ctrl, text='Lower HSV  (H 0-179, S/V 0-255)', font=('', 8)).pack(anchor='w')
-        self._lower_vars = []
-        for ch in ('H', 'S', 'V'):
-            row = tk.Frame(ctrl)
-            row.pack(fill='x', pady=1)
-            tk.Label(row, text=ch, width=2).pack(side='left')
-            v = tk.StringVar(value='0')
-            tk.Entry(row, textvariable=v, width=6).pack(side='left', fill='x', expand=True)
-            v.trace_add('write', lambda *_: self.update_preview())
-            self._lower_vars.append(v)
-
-        tk.Label(ctrl, text='Upper HSV', font=('', 8)).pack(anchor='w', pady=(6, 0))
-        self._upper_vars = []
-        for ch in ('H', 'S', 'V'):
-            row = tk.Frame(ctrl)
-            row.pack(fill='x', pady=1)
-            tk.Label(row, text=ch, width=2).pack(side='left')
-            v = tk.StringVar(value='255')
-            tk.Entry(row, textvariable=v, width=6).pack(side='left', fill='x', expand=True)
-            v.trace_add('write', lambda *_: self.update_preview())
-            self._upper_vars.append(v)
-
-        self._invert_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(ctrl, text='Invert mask', variable=self._invert_var,
-                       command=self.update_preview).pack(anchor='w', pady=6)
 
         ttk.Separator(ctrl, orient='horizontal').pack(fill='x', pady=4)
 
-        tk.Button(ctrl, text='Save to Config  (Ctrl+S)', command=self.save_to_config,
-              bg='#4fc3f7').pack(fill='x', pady=2)
+        rng_hdr = tk.Frame(ctrl)
+        rng_hdr.pack(fill='x', pady=(0, 2))
+        tk.Label(rng_hdr, text='Ranges  (H 0-179, S/V 0-255)', font=('', 8)).pack(side='left')
+        tk.Button(rng_hdr, text='+ Add', command=self._add_range).pack(side='right')
 
-        ttk.Separator(ctrl, orient='horizontal').pack(fill='x', pady=6)
+        # ── Bottom controls – packed BEFORE canvas so they stay pinned ──────
+        bottom = tk.Frame(ctrl)
+        bottom.pack(side='bottom', fill='x')
 
-        tk.Label(ctrl, text='Presets').pack(anchor='w')
-        tk.Button(ctrl, text='White-ish',  command=lambda: self._apply_preset([0,0,200],  [179,50,255])).pack(fill='x', pady=1)
-        tk.Button(ctrl, text='Yellow-ish', command=lambda: self._apply_preset([10,100,100],[35,255,255])).pack(fill='x', pady=1)
-        tk.Button(ctrl, text='Orange-ish', command=lambda: self._apply_preset([5,100,150], [30,255,255])).pack(fill='x', pady=1)
+        self._invert_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(bottom, text='Invert mask', variable=self._invert_var,
+                       command=self.update_preview).pack(anchor='w', pady=(6, 2))
+
+        ttk.Separator(bottom, orient='horizontal').pack(fill='x', pady=4)
+        tk.Button(bottom, text='Save to Config  (Ctrl+S)', command=self.save_to_config,
+                  bg='#4fc3f7').pack(fill='x', pady=2)
+        ttk.Separator(bottom, orient='horizontal').pack(fill='x', pady=6)
+
+        tk.Label(bottom, text='Presets  (appends a new range)').pack(anchor='w')
+        tk.Button(bottom, text='White-ish',  command=lambda: self._apply_preset([0,0,200],  [179,50,255])).pack(fill='x', pady=1)
+        tk.Button(bottom, text='Yellow-ish', command=lambda: self._apply_preset([10,100,100],[35,255,255])).pack(fill='x', pady=1)
+        tk.Button(bottom, text='Orange-ish', command=lambda: self._apply_preset([5,100,150], [30,255,255])).pack(fill='x', pady=1)
+
+        # ── Scrollable multi-range editor ─────────────────────────────────────
+        scroll_outer = tk.Frame(ctrl)
+        scroll_outer.pack(fill='both', expand=True)
+
+        self._ranges_canvas = tk.Canvas(scroll_outer, highlightthickness=0)
+        _rsb = ttk.Scrollbar(scroll_outer, orient='vertical', command=self._ranges_canvas.yview)
+        self._ranges_canvas.configure(yscrollcommand=_rsb.set)
+        _rsb.pack(side='right', fill='y')
+        self._ranges_canvas.pack(side='left', fill='both', expand=True)
+
+        self._ranges_inner = tk.Frame(self._ranges_canvas)
+        self._ranges_canvas_win = self._ranges_canvas.create_window(
+            (0, 0), window=self._ranges_inner, anchor='nw')
+        self._ranges_inner.bind('<Configure>', lambda e: self._ranges_canvas.configure(
+            scrollregion=self._ranges_canvas.bbox('all')))
+        self._ranges_canvas.bind('<Configure>', lambda e: self._ranges_canvas.itemconfig(
+            self._ranges_canvas_win, width=e.width))
+
+        self._range_rows = []  # list of {'lo': [sv]*3, 'hi': [sv]*3}
 
         right = tk.Frame(tab)
         right.pack(side='right', fill='both', expand=True)
@@ -214,7 +166,21 @@ class ColorRangeTester(tk.Tk):
         self._photo_orig = None
         self._photo_proc = None
 
-        self._load_current_range()
+        # OCR output
+        ocr_header = tk.Frame(right)
+        ocr_header.pack(fill='x', padx=4, pady=(4, 0))
+        tk.Label(ocr_header, text='OCR Output (Processed Image)').pack(side='left')
+        tk.Button(ocr_header, text='Run OCR', command=self._run_ocr).pack(side='right')
+        ocr_body = tk.Frame(right)
+        ocr_body.pack(fill='x', padx=4, pady=(0, 4))
+        self._ocr_text = tk.Text(ocr_body, height=5, wrap='word', state='disabled',
+                                  bg='#1e1e1e', fg='#d4d4d4', font=('Consolas', 9))
+        ocr_sb = tk.Scrollbar(ocr_body, command=self._ocr_text.yview)
+        self._ocr_text.config(yscrollcommand=ocr_sb.set)
+        ocr_sb.pack(side='right', fill='y')
+        self._ocr_text.pack(side='left', fill='x', expand=True)
+
+        self._rebuild_range_rows()
 
     # ── Live tab ──────────────────────────────────────────────────────────────
 
@@ -291,73 +257,102 @@ class ColorRangeTester(tk.Tk):
 
     # ── Config helpers ────────────────────────────────────────────────────────
 
-    def _load_current_range(self):
+    def _rebuild_range_rows(self):
+        """Rebuild the scrollable list of range rows from the current config."""
+        for w in self._ranges_inner.winfo_children():
+            w.destroy()
+        self._range_rows = []
+
         set_key = self._set_var.get()
-        idx     = self._idx_var.get()
         ranges  = self.cfg.get('color_ranges', {}).get(set_key, [])
         if not ranges:
-            return
-        idx = max(0, min(idx, len(ranges) - 1))
-        self._idx_var.set(idx)
-        self._idx_spin.config(to=max(0, len(ranges) - 1))
-        lo, hi = ranges[idx]
-        for i in range(3):
-            self._lower_vars[i].set(str(lo[i]))
-            self._upper_vars[i].set(str(hi[i]))
+            self.cfg.setdefault('color_ranges', {}).setdefault(set_key, []).append(
+                [[0, 0, 0], [179, 255, 255]])
+            ranges = self.cfg['color_ranges'][set_key]
+
+        for idx, (lo, hi) in enumerate(ranges):
+            self._append_range_row(idx, lo, hi)
+
+        self._ranges_inner.update_idletasks()
+        self._ranges_canvas.configure(scrollregion=self._ranges_canvas.bbox('all'))
+
+    def _append_range_row(self, idx: int, lo, hi):
+        """Add one range row widget to the scrollable inner frame."""
+        row_frame = tk.LabelFrame(self._ranges_inner, text=f'Range {idx}', padx=4, pady=2)
+        row_frame.pack(fill='x', padx=2, pady=2)
+        tk.Button(row_frame, text='✕', fg='red',
+                  command=lambda i=idx: self._remove_range(i)).pack(side='right', anchor='n')
+
+        lo_row = tk.Frame(row_frame)
+        lo_row.pack(fill='x', pady=1)
+        tk.Label(lo_row, text='Lo', width=3).pack(side='left')
+        lo_vars = []
+        for ch, val in zip('HSV', lo):
+            tk.Label(lo_row, text=ch, width=1).pack(side='left')
+            v = tk.StringVar(value=str(val))
+            tk.Entry(lo_row, textvariable=v, width=4).pack(side='left', padx=(0, 2))
+            v.trace_add('write', lambda *_: self.update_preview())
+            lo_vars.append(v)
+
+        hi_row = tk.Frame(row_frame)
+        hi_row.pack(fill='x', pady=1)
+        tk.Label(hi_row, text='Hi', width=3).pack(side='left')
+        hi_vars = []
+        for ch, val in zip('HSV', hi):
+            tk.Label(hi_row, text=ch, width=1).pack(side='left')
+            v = tk.StringVar(value=str(val))
+            tk.Entry(hi_row, textvariable=v, width=4).pack(side='left', padx=(0, 2))
+            v.trace_add('write', lambda *_: self.update_preview())
+            hi_vars.append(v)
+
+        self._range_rows.append({'lo': lo_vars, 'hi': hi_vars})
 
     def _on_set_changed(self):
-        self._idx_var.set(0)
-        self._load_current_range()
-        self.update_preview()
-
-    def _on_idx_changed(self):
-        self._load_current_range()
+        self._rebuild_range_rows()
         self.update_preview()
 
     def _add_range(self):
         set_key = self._set_var.get()
-        cr = self.cfg.setdefault('color_ranges', {})
-        cr.setdefault(set_key, []).append([[0, 0, 0], [179, 255, 255]])
-        self._idx_spin.config(to=len(cr[set_key]) - 1)
-        self._idx_var.set(len(cr[set_key]) - 1)
-        self._load_current_range()
+        cr      = self.cfg.setdefault('color_ranges', {})
+        current = self._read_all_ranges() or []
+        current.append([[0, 0, 0], [179, 255, 255]])
+        cr[set_key] = current
+        self._rebuild_range_rows()
+        self._ranges_canvas.yview_moveto(1.0)
 
-    def _remove_range(self):
-        set_key = self._set_var.get()
-        ranges  = self.cfg.get('color_ranges', {}).get(set_key, [])
-        if len(ranges) <= 1:
+    def _remove_range(self, idx: int):
+        if len(self._range_rows) <= 1:
             messagebox.showinfo('Cannot remove', 'At least one range must remain.')
             return
-        idx = self._idx_var.get()
-        ranges.pop(idx)
-        new_idx = max(0, idx - 1)
-        self._idx_spin.config(to=max(0, len(ranges) - 1))
-        self._idx_var.set(new_idx)
-        self._load_current_range()
+        set_key = self._set_var.get()
+        current = self._read_all_ranges() or []
+        if idx < len(current):
+            current.pop(idx)
+        self.cfg.setdefault('color_ranges', {})[set_key] = current
+        self._rebuild_range_rows()
         self.update_preview()
 
-    def _read_current_range(self):
+    def _read_all_ranges(self):
+        """Read all range rows; returns list of [lo, hi] or None on parse error."""
+        result = []
         try:
-            lo = [int(v.get()) for v in self._lower_vars]
-            hi = [int(v.get()) for v in self._upper_vars]
-            return lo, hi
+            for row in self._range_rows:
+                lo = [int(v.get()) for v in row['lo']]
+                hi = [int(v.get()) for v in row['hi']]
+                result.append([lo, hi])
         except ValueError:
-            return None, None
+            return None
+        return result
 
     def save_to_config(self):
-        lo, hi = self._read_current_range()
-        if lo is None:
+        ranges = self._read_all_ranges()
+        if ranges is None:
             messagebox.showerror('Invalid', 'HSV values must be integers.')
             return
         set_key = self._set_var.get()
-        idx     = self._idx_var.get()
-        cr = self.cfg.setdefault('color_ranges', {})
-        ranges  = cr.setdefault(set_key, [])
-        while len(ranges) <= idx:
-            ranges.append([[0, 0, 0], [179, 255, 255]])
-        ranges[idx] = [lo, hi]
+        self.cfg.setdefault('color_ranges', {})[set_key] = ranges
         save_config(self.cfg)
-        messagebox.showinfo('Saved', f'Saved {set_key}[{idx}] to config.json')
+        messagebox.showinfo('Saved', f'Saved {set_key} ({len(ranges)} range(s)) to config.json')
 
     def _on_live_region_changed(self):
         key    = self._live_region_var.get()
@@ -391,7 +386,7 @@ class ColorRangeTester(tk.Tk):
         save_config(self.cfg)
         self._refresh_color_sets()
         self._set_var.set(name)
-        self._load_current_range()
+        self._rebuild_range_rows()
 
     def _delete_color_set(self):
         name = self._set_var.get()
@@ -425,6 +420,9 @@ class ColorRangeTester(tk.Tk):
             self._set_var.set(sets[0])
         else:
             self._set_var.set('')
+        if hasattr(self, '_ranges_inner'):
+            self._rebuild_range_rows()
+            self.update_preview()
 
     def _new_region(self):
         name = simple_input(self, 'New region name')
@@ -493,44 +491,54 @@ class ColorRangeTester(tk.Tk):
         cv2.imwrite(path, self.processed_cv)
         messagebox.showinfo('Saved', f'Saved to:\n{path}')
 
-    def _cv_to_photo(self, cv_img, label):
+    def _photo_for_label(self, cv_img, label):
+        """Convert BGR image to PhotoImage sized to fit *label*."""
         self.update_idletasks()
-        lw = label.winfo_width()  or 800
+        lw = label.winfo_width() or 800
         lh = label.winfo_height() or 300
-        rgb   = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-        img   = Image.fromarray(rgb)
-        w, h  = img.size
-        scale = min(1.0, lw / max(w, 1), lh / max(h, 1))
-        if scale < 1.0:
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
-        return ImageTk.PhotoImage(img)
+        return bgr_to_photo(cv_img, max_w=lw, max_h=lh)
 
     def update_preview(self):
         if self.cv_image is None:
             return
-        lo, hi = self._read_current_range()
-        if lo is None:
+        ranges = self._read_all_ranges()
+        if not ranges:
             return
         invert = self._invert_var.get()
-        self.processed_cv = _apply_single(self.cv_image, lo, hi, invert=invert)
+        self.processed_cv = apply_color_mask(self.cv_image, ranges, invert=invert)
         try:
-            p = self._cv_to_photo(self.cv_image, self._lbl_orig)
+            p = self._photo_for_label(self.cv_image, self._lbl_orig)
             self._photo_orig = p
             self._lbl_orig.config(image=p)
         except Exception:
             pass
         try:
-            p = self._cv_to_photo(self.processed_cv, self._lbl_proc)
+            p = self._photo_for_label(self.processed_cv, self._lbl_proc)
             self._photo_proc = p
             self._lbl_proc.config(image=p)
         except Exception:
             pass
 
     def _apply_preset(self, lo, hi):
-        for i in range(3):
-            self._lower_vars[i].set(str(lo[i]))
-            self._upper_vars[i].set(str(hi[i]))
+        set_key = self._set_var.get()
+        current = self._read_all_ranges() or []
+        current.append([lo, hi])
+        self.cfg.setdefault('color_ranges', {})[set_key] = current
+        self._rebuild_range_rows()
         self.update_preview()
+
+    def _run_ocr(self):
+        if self.processed_cv is None:
+            messagebox.showinfo('No image', 'No processed image to run OCR on.')
+            return
+        try:
+            text = run_ocr(self.processed_cv)
+        except Exception as exc:
+            text = f'OCR Error: {exc}'
+        self._ocr_text.config(state='normal')
+        self._ocr_text.delete('1.0', 'end')
+        self._ocr_text.insert('end', text.strip() or '(no text detected)')
+        self._ocr_text.config(state='disabled')
 
     # ── Live tab actions ──────────────────────────────────────────────────────
 
@@ -559,31 +567,24 @@ class ColorRangeTester(tk.Tk):
         except ValueError:
             return
 
-        screen = ImageGrab.grab()
-        sw, sh = screen.size
-        x1 = int(region['x1'] * sw)
-        y1 = int(region['y1'] * sh)
-        x2 = int(region['x2'] * sw)
-        y2 = int(region['y2'] * sh)
-        cropped_pil = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-        cropped     = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
+        cropped = capture_region(region)
 
         set_key   = self._live_set_var.get()
-        ranges    = self.cfg.get(set_key, [])
+        ranges    = self.cfg.get('color_ranges', {}).get(set_key, [])
         invert    = self._live_invert_var.get()
-        processed = _apply_all(cropped, ranges, invert=invert)
+        processed = apply_color_mask(cropped, ranges, invert=invert)
 
         self.after(0, self._update_live_labels, cropped, processed)
 
     def _update_live_labels(self, orig_bgr, proc_bgr):
         try:
-            p = self._cv_to_photo(orig_bgr, self._lbl_live_orig)
+            p = self._photo_for_label(orig_bgr, self._lbl_live_orig)
             self._photo_live_orig = p
             self._lbl_live_orig.config(image=p)
         except Exception:
             pass
         try:
-            p = self._cv_to_photo(proc_bgr, self._lbl_live_proc)
+            p = self._photo_for_label(proc_bgr, self._lbl_live_proc)
             self._photo_live_proc = p
             self._lbl_live_proc.config(image=p)
         except Exception:

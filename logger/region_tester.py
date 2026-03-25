@@ -20,64 +20,17 @@ Dependencies: opencv-python, pillow, numpy, pytesseract
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from PIL import Image, ImageTk, ImageGrab
 import cv2
 import numpy as np
-import pytesseract
-import json
-import os
-import sys
 import threading
 import time
 
-# ── Bootstrap shared utilities ────────────────────────────────────────────────
-# We import from the sibling modules; fall back gracefully if run standalone.
-try:
-    from config_utils import _app_dir, _load_app_config, _get_tesseract_path
-    from image_utils import apply_color_mask, sanitize_ocr_lines
-except ImportError:
-    def _app_dir():
-        return os.path.dirname(os.path.abspath(__file__))
+from config_utils import _load_app_config, _cfg_to_ranges, init_tesseract
+from image_utils import (apply_color_mask, sanitize_ocr_lines, capture_region,
+                         apply_contrast, run_ocr, bgr_to_photo, load_ocr_replacements)
 
-    def _load_app_config():
-        p = os.path.join(_app_dir(), 'config.json')
-        try:
-            with open(p, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-    def _get_tesseract_path():
-        for c in (r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-                  r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe'):
-            if os.path.exists(c):
-                return c
-        return 'tesseract'
-
-    def apply_color_mask(image, color_ranges, invert=False):
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        combined = np.zeros(image.shape[:2], dtype=np.uint8)
-        for lower, upper in color_ranges:
-            combined = cv2.bitwise_or(combined, cv2.inRange(hsv, lower, upper))
-        if invert:
-            combined = cv2.bitwise_not(combined)
-        out = np.zeros_like(image)
-        out[combined > 0] = [255, 255, 255]
-        return out
-
-    def sanitize_ocr_lines(text: str) -> list:
-        result = []
-        for raw_line in text.splitlines():
-            line = raw_line.replace('@', '').replace('€', '').replace('&', '').strip()
-            if not line:
-                continue
-            token = line.split()[-1]
-            if token:
-                result.append(token)
-        return result
-
-
-pytesseract.pytesseract.tesseract_cmd = _get_tesseract_path()
+init_tesseract()
+load_ocr_replacements(_load_app_config())
 
 # ── PSM options ───────────────────────────────────────────────────────────────
 PSM_OPTIONS = [
@@ -94,36 +47,7 @@ PSM_OPTIONS = [
 PSM_VALUES = [0, 3, 4, 6, 7, 8, 10, 11, 13]
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _cfg_to_range_list(raw: list) -> list:
-    """Convert [[lo, hi], …] JSON data to list of (np.array, np.array) pairs."""
-    return [
-        (np.array(lo, dtype=np.uint8), np.array(hi, dtype=np.uint8))
-        for lo, hi in raw
-    ]
-
-
-def _capture_region(rel_bounds: dict) -> np.ndarray:
-    """Grab the given relative screen region and return as BGR ndarray."""
-    screen = ImageGrab.grab()
-    sw, sh = screen.size
-    x1 = int(rel_bounds['x1'] * sw)
-    y1 = int(rel_bounds['y1'] * sh)
-    x2 = int(rel_bounds['x2'] * sw)
-    y2 = int(rel_bounds['y2'] * sh)
-    crop = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-    return cv2.cvtColor(np.array(crop), cv2.COLOR_RGB2BGR)
-
-
-def _cv_to_photo(cv_img: np.ndarray, max_w: int = 520, max_h: int = 220) -> ImageTk.PhotoImage:
-    """Convert a BGR ndarray to a Tk PhotoImage, scaled to fit max_w × max_h."""
-    h, w = cv_img.shape[:2]
-    scale = min(1.0, max_w / max(w, 1), max_h / max(h, 1))
-    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
-    resized = cv2.resize(cv_img, (new_w, new_h))
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    return ImageTk.PhotoImage(Image.fromarray(rgb))
 
 
 # ── Main application ──────────────────────────────────────────────────────────
@@ -367,7 +291,7 @@ class RegionTester(tk.Tk):
         for i in selected_indices:
             if i < len(color_sets):
                 raw = self._cfg['color_ranges'][color_sets[i]]
-                ranges.extend(_cfg_to_range_list(raw))
+                ranges.extend(_cfg_to_ranges(raw))
         ranges.extend(self._extra_ranges)
         return ranges
 
@@ -377,20 +301,6 @@ class RegionTester(tk.Tk):
         label = self._psm_var.get()
         idx = PSM_OPTIONS.index(label) if label in PSM_OPTIONS else 5
         return PSM_VALUES[idx]
-
-    def _run_ocr(self, processed_bgr: np.ndarray) -> str:
-        psm = self._get_psm()
-        config = f'--psm {psm}'
-        whitelist = self._whitelist_var.get().strip()
-        if whitelist:
-            config += f' -c tessedit_char_whitelist={whitelist}'
-        rgb = cv2.cvtColor(processed_bgr, cv2.COLOR_BGR2RGB)
-        raw = pytesseract.image_to_string(rgb, config=config)
-        if self._sanitize_var.get():
-            tokens = sanitize_ocr_lines(raw)
-            return '\n'.join(tokens) if tokens else ''
-        else:
-            return raw.strip() or ''
 
     # ── Live loop ──────────────────────────────────────────────────────────────
 
@@ -426,18 +336,15 @@ class RegionTester(tk.Tk):
         if region is None:
             return
 
-        orig = _capture_region(region)
+        orig = capture_region(region)
         ranges = self._build_ranges()
 
         if ranges:
-            # Always produce white-on-black mask from color ranges; final
-            # inversion (if requested) is applied after contrast below.
             proc = apply_color_mask(orig, ranges, invert=False)
         else:
-            # No ranges selected: show greyscale so it's still useful
             grey = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
             proc = cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR)
-        # Apply contrast around a brightness pivot before OCR (and for preview)
+
         try:
             contrast = float(self._contrast_var.get())
         except Exception:
@@ -447,29 +354,30 @@ class RegionTester(tk.Tk):
         except Exception:
             pivot = 128
 
-        if contrast != 1.0:
-            pivot_img = np.full(proc.shape, pivot, dtype=np.uint8)
-            proc_for_ocr = cv2.addWeighted(proc, contrast, pivot_img, 1.0 - contrast, 0)
-        else:
-            proc_for_ocr = proc
+        proc_for_ocr = apply_contrast(proc, contrast, pivot)
 
-        # Optionally invert the final output (useful for Tesseract preferences)
         if self._invert_output_var.get():
             proc_for_ocr = cv2.bitwise_not(proc_for_ocr)
 
-        ocr_text = self._run_ocr(proc_for_ocr) if ranges or True else '(no ranges — select at least one)'
+        raw = run_ocr(proc_for_ocr, psm=self._get_psm(),
+                      whitelist=self._whitelist_var.get().strip())
+        if self._sanitize_var.get():
+            tokens = sanitize_ocr_lines(raw, self._region_var.get())
+            ocr_text = '\n'.join(tokens) if tokens else ''
+        else:
+            ocr_text = raw
 
         self.after(0, self._update_ui, orig, proc_for_ocr, ocr_text)
 
     def _update_ui(self, orig_bgr, proc_bgr, ocr_text: str):
         try:
-            p = _cv_to_photo(orig_bgr)
+            p = bgr_to_photo(orig_bgr)
             self._photo_orig = p
             self._lbl_orig.config(image=p)
         except Exception:
             pass
         try:
-            p = _cv_to_photo(proc_bgr)
+            p = bgr_to_photo(proc_bgr)
             self._photo_proc = p
             self._lbl_proc.config(image=p)
         except Exception:

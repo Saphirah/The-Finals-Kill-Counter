@@ -28,6 +28,13 @@ def _load_app_config() -> dict:
         return {}
 
 
+def save_config(cfg: dict) -> None:
+    """Write *cfg* to config.json in the app directory."""
+    cfg_path = os.path.join(_app_dir(), 'config.json')
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2)
+
+
 def _cfg_to_ranges(raw: list) -> list:
     """Convert list-of-[[lo],[hi]] from JSON into numpy array tuples."""
     return [
@@ -56,3 +63,9 @@ def _get_tesseract_path() -> str:
         if os.path.exists(candidate):
             return candidate
     return 'tesseract'  # rely on PATH
+
+
+def init_tesseract() -> None:
+    """Set the pytesseract executable path. Call once at startup."""
+    import pytesseract
+    pytesseract.pytesseract.tesseract_cmd = _get_tesseract_path()

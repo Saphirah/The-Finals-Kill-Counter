@@ -8,7 +8,6 @@ post-match stats when it is detected.
 import time
 import cv2
 import numpy as np
-import pytesseract
 import json
 import re
 import difflib
@@ -28,8 +27,8 @@ from pynput import keyboard as pynput_keyboard
 import pystray
 from tkinter import messagebox
 
-from config_utils import _app_dir, _load_app_config, _cfg_to_ranges, _get_tesseract_path
-from image_utils import apply_color_mask, sanitize_ocr_lines
+from config_utils import _app_dir, _load_app_config, _cfg_to_ranges, init_tesseract
+from image_utils import apply_color_mask, sanitize_ocr_lines, capture_region, run_ocr, load_ocr_replacements, apply_ocr_replacements
 
 
 _cfg = _load_app_config()
@@ -527,8 +526,6 @@ class ScreenshotMonitor:
         self._last_live_map: str | None = None
         self.load_mask()
         self.start_tab_listener()
-
-        # Tesseract path is resolved in main() via _get_tesseract_path().
     
 
     def load_mask(self):
@@ -542,21 +539,10 @@ class ScreenshotMonitor:
             'x2': 1483 / 2559,
             'y2': 1260 / 1439,
         }
-        self.crop_bounds = _cfg.get('crop_bounds_rel', default)
+        self.crop_bounds = _cfg.get('crop_bo unds_rel', default)
         print(f"✓ Crop bounds loaded from config: "
               f"({self.crop_bounds['x1']:.6f}, {self.crop_bounds['y1']:.6f}) to "
               f"({self.crop_bounds['x2']:.6f}, {self.crop_bounds['y2']:.6f})")
-    
-    def capture_region(self, rel_bounds):
-        """Capture a specific relative region from the screen."""
-        screen = ImageGrab.grab()
-        sw, sh = screen.size
-        x1 = int(rel_bounds['x1'] * sw)
-        y1 = int(rel_bounds['y1'] * sh)
-        x2 = int(rel_bounds['x2'] * sw)
-        y2 = int(rel_bounds['y2'] * sh)
-        region = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-        return cv2.cvtColor(np.array(region), cv2.COLOR_RGB2BGR)
 
     def is_game_running(self):
         """Check if the in-game countdown timer is visible.
@@ -564,7 +550,7 @@ class ScreenshotMonitor:
         Grabs only the countdown region, isolates white text (inverted),
         runs OCR, and returns True if a MM:SS pattern is found.
         """
-        img = self.capture_region(COUNTDOWN_REGION_REL)
+        img = capture_region(COUNTDOWN_REGION_REL)
         # push raw capture for optional debugging
         if self.overlay_state is not None:
             self.overlay_state['timer_image_bgr'] = img
@@ -573,9 +559,9 @@ class ScreenshotMonitor:
         processed = apply_color_mask(img, COLOR_RANGES_COUNTDOWN, invert=True)
         if self.overlay_state is not None:
             self.overlay_state['timer_image_bgr_processed'] = processed
-        rgb = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
 
-        text = pytesseract.image_to_string(rgb, config='--psm 7 -c tessedit_char_whitelist=0123456789:').strip()
+        text = run_ocr(processed, psm=7, whitelist='0123456789:')
+        text = apply_ocr_replacements(text, 'countdown_region_rel')
         # Primary: MM:SS format
         match = re.search(r'\d{1,2}:\d{2}', text)
         if match:
@@ -588,8 +574,8 @@ class ScreenshotMonitor:
     def detect_map(self, image):
         """Detect map name from image using OCR + fuzzy matching against known maps."""
         preprocessed = apply_color_mask(image, COLOR_RANGES_MAP, invert=True)
-        rgb_image = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2RGB)
-        text = pytesseract.image_to_string(rgb_image, config='--psm 7').strip()
+        text = run_ocr(preprocessed, psm=7)
+        text = apply_ocr_replacements(text, 'map_region_rel')
 
         if not text:
             print("[TAB] No text detected in map region")
@@ -626,33 +612,22 @@ class ScreenshotMonitor:
         print(f"[TAB] Could not match '{text}' to any known map — ignoring")
         return None
 
-    # Matches a trailing "number" that may contain OCR '1' misreads (l, I, |).
-    # Always anchored to the end of a line because the stat value is the last token.
-    _STAT_END_RE  = re.compile(r'[\d,lI|]+\s*$')
-    # Characters Tesseract commonly returns instead of the digit '1'.
-    _OCR_ONE_RE   = re.compile(r'[lI|]')
+    # Matches a trailing number (possibly with commas or dots) at end of line.
+    _STAT_END_RE = re.compile(r'[\d,.]+\s*$')
 
     def parse_stats(self, text):
         """Parse OCR text lines positionally into a stats dict.
 
-        Line order is reliable even when Tesseract mis-reads individual words.
-        The numeric value is **always the last token** on each line, so we
-        anchor the search to the end of the line.  Tesseract frequently
-        returns 'l', 'I', or '|' instead of '1'; those are normalised before
-        the integer is extracted.
+        ocr_replacements for crop_bounds_rel are already applied before this
+        is called, so only digits and commas remain in number positions.
+        The value is always the last token on each line.
         """
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         stats = {}
         for i, key in enumerate(STAT_KEYS):
             if i < len(lines):
                 m = self._STAT_END_RE.search(lines[i])
-                if m:
-                    # Normalise OCR '1' misreads, then keep only digits and commas.
-                    normalised = self._OCR_ONE_RE.sub('1', m.group().strip())
-                    digits = re.sub(r'[^0-9]', '', normalised)
-                    stats[key] = int(digits) if digits else None
-                else:
-                    stats[key] = None
+                stats[key] = int(re.sub(r'[^0-9]', '', m.group())) if m else None
             else:
                 stats[key] = None
         return stats
@@ -670,7 +645,7 @@ class ScreenshotMonitor:
             # Short delay to let scoreboard render, then detect map once.
             time.sleep(0.1)
             try:
-                img = self.capture_region(MAP_REGION_REL)
+                img = capture_region(MAP_REGION_REL)
                 processed_map = apply_color_mask(img, COLOR_RANGES_MAP, invert=True)
                 if self.overlay_state is not None:
                     self.overlay_state['map_image_bgr'] = img
@@ -689,7 +664,7 @@ class ScreenshotMonitor:
             # Continuous players sampling loop
             while self._tab_pressed:
                 try:
-                    player_img = self.capture_region(PLAYERS_TAB_REGION_REL)
+                    player_img = capture_region(PLAYERS_TAB_REGION_REL)
                     if self.overlay_state is not None:
                         self.overlay_state['players_image_bgr'] = player_img
                         self.overlay_state['players_image_bgr_processed'] = player_img
@@ -726,22 +701,14 @@ class ScreenshotMonitor:
         print("✓ Tab held listener active (hold Tab in-game to scan players)")
 
     def detect_players(self, image):
-        """OCR the players tab region and return detected names (one per line, up to 10).
+        """OCR the players tab region and return detected names (up to 10).
 
-        Applies the full preprocessing pipeline from region_tester:
-        1. Color mask with COLOR_RANGES_COUNTDOWN (inverted for white text)
-        2. Contrast adjustment around brightness pivot (default: contrast=1.0, pivot=128)
-        3. Invert output (for Tesseract preference)
-        4. Run OCR with PSM 3 (fully automatic, block of text)
-        5. Sanitize to extract player names
-        
         Players are listed top-to-bottom: slots 0-4 = friendly team, 5-9 = enemy.
         """
         grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         proc = cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR)
-        rgb = cv2.cvtColor(proc, cv2.COLOR_BGR2RGB)
-        text = pytesseract.image_to_string(rgb, config='--psm 3').strip()
-        lines = sanitize_ocr_lines(text)
+        text = run_ocr(proc, psm=3)
+        lines = sanitize_ocr_lines(text, 'players_tab_region')
         return lines[:10]
 
     def get_most_detected_players(self):
@@ -802,16 +769,11 @@ class ScreenshotMonitor:
         
         # Preprocess to isolate white and yellow text
         preprocessed_image = apply_color_mask(cropped_image, COLOR_RANGES_ENDSCREEN, invert=True)
-        
-        # Convert BGR to RGB for pytesseract
-        rgb_image = cv2.cvtColor(preprocessed_image, cv2.COLOR_BGR2RGB)
-        
-        # Perform OCR with better config for numbers
-        # --psm 6 assumes uniform block of text
-        # digits for character whitelist
-        config = '--psm 6'
-        text = pytesseract.image_to_string(rgb_image, config=config)
-        return text.strip(), cropped_image, preprocessed_image
+
+        # Perform OCR
+        text = run_ocr(preprocessed_image)
+        text = apply_ocr_replacements(text, 'crop_bounds_rel')
+        return text, cropped_image, preprocessed_image
     
     def save_log(self, stats, similarity_score, cropped_image, preprocessed_image, won=None):
         """Save detection as a JSON log plus cropped/processed images."""
@@ -1040,10 +1002,10 @@ class ScreenshotMonitor:
                     # match against END_SCREEN_WIN/LOSS_KEYWORDS (config.json)
                     # triggers the final stats capture.
                     try:
-                        elim_img = self.capture_region(ELIMINATED_WON_REGION_REL)
+                        elim_img = capture_region(ELIMINATED_WON_REGION_REL)
                         processed_elim = apply_color_mask(elim_img, COLOR_RANGES_COUNTDOWN, invert=True)
-                        rgb_elim = cv2.cvtColor(processed_elim, cv2.COLOR_BGR2RGB)
-                        elim_text = pytesseract.image_to_string(rgb_elim, config='--psm 7').strip()
+                        elim_text = run_ocr(processed_elim, psm=7)
+                        elim_text = apply_ocr_replacements(elim_text, 'eliminated_won_region')
                         ts = datetime.now().strftime("%H:%M:%S")
                         remaining = int(PHASE2_TIMEOUT - elapsed)
                         print(f"[{ts}] Eliminated/Winners OCR: '{elim_text}' (timeout in {remaining}s)")
@@ -1107,7 +1069,8 @@ def main():
             pass
 
     # Resolve Tesseract before creating the monitor.
-    pytesseract.pytesseract.tesseract_cmd = _get_tesseract_path()
+    init_tesseract()
+    load_ocr_replacements(_cfg)
 
     profile_name = get_or_create_profile()
 
